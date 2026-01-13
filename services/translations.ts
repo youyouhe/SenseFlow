@@ -1,0 +1,82 @@
+export const translations = {
+  en: {
+    app_name: "ChunkMaster",
+    slogan: "Auditory Fitness",
+    nav_library: "Library",
+    nav_player: "Player",
+    nav_settings: "Settings",
+    local_status_title: "Local Engine",
+    local_status_ready: "Ready",
+    
+    lib_title: "Discovery",
+    lib_subtitle: "Community materials & AI generation.",
+    lib_import: "Import JSON",
+    lib_workshop_btn: "AI Workshop",
+    lib_gen_title: "Generate Study Material",
+    lib_gen_topic: "Topic / Scenario",
+    lib_gen_topic_ph: "e.g., A debate about artificial intelligence, Ordering sushi in Tokyo...",
+    lib_gen_diff: "Difficulty",
+    lib_gen_btn_loading: "Dreaming...",
+    lib_gen_btn_create: "Generate Content",
+    lib_gen_btn_random: "Surprise Me",
+    lib_start: "Start",
+    
+    player_empty: "Select a material from the library to start training.",
+    player_chunk_mode: "Chunk Mode",
+    player_full_mode: "Full Text",
+    player_noise_label: "NOISE",
+    
+    settings_title: "Configuration",
+    settings_subtitle: "Manage your BYOK (Bring Your Own Key) settings and local engine preferences.",
+    settings_cloud_title: "Cloud Providers",
+    settings_local_title: "Local Inference Engine",
+    settings_local_desc: "Compatible with CosyVoice and Ollama containers.",
+    settings_local_endpoint: "Local API Endpoint",
+    settings_save: "Save Configuration",
+    settings_saved_msg: "Settings saved!",
+    settings_lang_label: "Interface Language",
+    
+    err_no_key: "No API Key found. Please configure OpenAI, Gemini, or DeepSeek in Settings.",
+    err_api_fail: "API Error"
+  },
+  zh: {
+    app_name: "意群大师",
+    slogan: "听力健身房",
+    nav_library: "资料库",
+    nav_player: "播放器",
+    nav_settings: "设置",
+    local_status_title: "本地引擎",
+    local_status_ready: "就绪",
+    
+    lib_title: "发现",
+    lib_subtitle: "社区素材与AI生成",
+    lib_import: "导入 JSON",
+    lib_workshop_btn: "AI 工坊",
+    lib_gen_title: "生成学习资料",
+    lib_gen_topic: "主题 / 场景",
+    lib_gen_topic_ph: "例如：关于人工智能的辩论，在东京点寿司...",
+    lib_gen_diff: "难度",
+    lib_gen_btn_loading: "生成中...",
+    lib_gen_btn_create: "生成内容",
+    lib_gen_btn_random: "随便来点",
+    lib_start: "开始",
+    
+    player_empty: "请从资料库选择素材开始训练。",
+    player_chunk_mode: "意群模式",
+    player_full_mode: "全文模式",
+    player_noise_label: "噪音干扰",
+    
+    settings_title: "配置",
+    settings_subtitle: "管理您的 BYOK (自带密钥) 设置和本地引擎首选项。",
+    settings_cloud_title: "云端服务商",
+    settings_local_title: "本地推理引擎",
+    settings_local_desc: "兼容 CosyVoice 和 Ollama 容器。",
+    settings_local_endpoint: "本地 API 端点",
+    settings_save: "保存配置",
+    settings_saved_msg: "设置已保存！",
+    settings_lang_label: "界面语言",
+    
+    err_no_key: "未找到 API 密钥。请在设置中配置 OpenAI、Gemini 或 DeepSeek。",
+    err_api_fail: "API 错误"
+  }
+};

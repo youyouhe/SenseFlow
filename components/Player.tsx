@@ -393,12 +393,6 @@ export const Player = () => {
           </>
         )
       }
-      // Words don't match text - log once and fall back to plain text
-      console.warn(`[Chunk ${chunk.id}] words mismatch detected by WhisperX transcription`, {
-        expected: chunk.text,
-        got: wordsText,
-        resolution: 'Using original chunk.text for display',
-      })
     }
 
     // Default: Always render the original chunk.text (most reliable)

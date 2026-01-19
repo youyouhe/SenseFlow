@@ -225,6 +225,9 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
     console.log('[TTS] Actual audio duration:', actualAudioDuration, 'seconds')
     console.log('[TTS] Audio sample rate:', sampleRate, 'Hz')
 
+    // Update material duration with actual value
+    material.duration = Number(actualAudioDuration.toFixed(2))
+
     console.log('[TTS] CosyVoice returned words:', ttsResult.words?.length || 0)
     if (ttsResult.words && ttsResult.words.length > 0) {
       console.log(
@@ -310,8 +313,8 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
           if (wordIndex >= allWords.length) break
 
           const currentWord = allWords[wordIndex]
-          const wordText = currentWord.word.trim().replace(/[.,!?;:]/g, '')
-          const textWordClean = textWord.trim().replace(/[.,!?;:]/g, '')
+          const wordText = currentWord.word.trim().replace(/[.,!?;:\"'()]/g, '')
+          const textWordClean = textWord.trim().replace(/[.,!?;:\"'()]/g, '')
 
           // Check if words match (fuzzy matching to handle punctuation/case differences)
           if (wordText.toLowerCase() === textWordClean.toLowerCase()) {
@@ -328,7 +331,7 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
               lookAhead++
             ) {
               const lookAheadWord = allWords[wordIndex + lookAhead]
-              const lookAheadText = lookAheadWord.word.trim().replace(/[.,!?;:]/g, '')
+              const lookAheadText = lookAheadWord.word.trim().replace(/[.,!?;:\"'()]/g, '')
               if (lookAheadText.toLowerCase() === textWordClean.toLowerCase()) {
                 // Found it! Add the skipped words and this word
                 for (let k = 0; k <= lookAhead; k++) {
@@ -342,12 +345,14 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
             }
 
             if (!found) {
-              // Could not find matching word - skip this text word and continue
+              // CRITICAL FIX: If we can't find a better match ahead, trust the sequence.
+              // Use the time from WhisperX but keep the original word from text to maintain consistency.
               console.warn(
-                `[TTS] Chunk ${i + 1}: Could not match word "${textWord}" at position ${wordIndex}, ` +
-                  `expected "${textWordClean}" but got "${wordText}"`
+                `[TTS] Chunk ${i + 1}: Mismatch detected ("${textWordClean}" vs "${wordText}"). ` +
+                  `Trusting sequence and keeping current word at index ${wordIndex}`
               )
-              // Still advance wordIndex to avoid infinite loop
+              chunkWords.push({ ...currentWord, word: textWord }) // Keep estimated word from text
+              matchedWordCount++
               wordIndex++
             }
           }
@@ -363,6 +368,7 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
 
     // Second pass: recalculate chunk timestamps based on actual word timestamps
     console.log('[TTS] Recalculating chunk timestamps based on WhisperX word alignments...')
+    let lastEndTime = 0
     for (let i = 0; i < material.chunks.length; i++) {
       const chunk = material.chunks[i]
       if (chunk.words && chunk.words.length > 0) {
@@ -375,13 +381,21 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
 
         // Add small padding (0.1s before) for natural pauses, but use word-level end as boundary
         const padding = 0.1
-        chunk.start_time = Math.max(0, firstWordStart - padding)
+        let startTime = Math.max(0, firstWordStart - padding)
+
+        // FIX: Prevent timestamp overlap with previous chunk
+        if (startTime < lastEndTime) {
+          startTime = lastEndTime
+        }
+
+        chunk.start_time = startTime
         chunk.end_time = lastWordEnd // 统一使用词级end作为chunk结束时间
+        lastEndTime = chunk.end_time
 
         // Adjust word timestamps relative to new chunk start
-        for (let i = 0; i < chunk.words.length; i++) {
-          chunk.words[i].start = Math.max(0, originalWords[i].start - chunk.start_time)
-          chunk.words[i].end = originalWords[i].end - chunk.start_time
+        for (let j = 0; j < chunk.words.length; j++) {
+          chunk.words[j].start = Math.max(0, originalWords[j].start - chunk.start_time)
+          chunk.words[j].end = originalWords[j].end - chunk.start_time
         }
 
         console.log(

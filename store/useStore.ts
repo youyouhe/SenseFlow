@@ -51,6 +51,7 @@ const DEFAULT_PROGRESS: UserProgress = {
 
 interface PlayerState {
   isPlaying: boolean
+  isGap: boolean
   isLoadingAudio: boolean
   currentTime: number
   duration: number
@@ -128,6 +129,7 @@ async function initializeStore() {
 
 export const useStore = create<PlayerState>((set, get) => ({
   isPlaying: false,
+  isGap: false,
   isLoadingAudio: false,
   currentTime: 0,
   duration: 0,
@@ -320,12 +322,13 @@ export const useStore = create<PlayerState>((set, get) => ({
           chunk,
           audioElapsedTime => {
             // 修复：基于chunk开始时间和音频播放进度计算绝对时间
-            // gap期间将由tick函数继续累加currentTime
-            set({ currentTime: chunk.start_time + audioElapsedTime })
+            // 只有当音频真正有进度产生时，才确保isGap为false
+            set({ currentTime: chunk.start_time + audioElapsedTime, isGap: false })
           },
           () => {
             clearTimeout(loadingTimeout)
-            set({ isLoadingAudio: false, currentChunkIndex: currentIndex })
+            // 音频播放结束，进入Gap状态
+            set({ isLoadingAudio: false, currentChunkIndex: currentIndex, isGap: true })
 
             const { stopAfterCurrentChunk } = get()
             if (stopAfterCurrentChunk) {
@@ -342,11 +345,13 @@ export const useStore = create<PlayerState>((set, get) => ({
                 const nextChunk = activeMaterial.chunks[nextIndex]
 
                 if (shouldSeamless) {
+                  // 在Gap结束后进入下一个chunk之前，确保时间戳正确，并准备开始播放
                   set({
                     currentChunkIndex: nextIndex,
                     currentTime: nextChunk.start_time,
                     isPlaying: true,
                     isLoadingAudio: true,
+                    isGap: false, // 准备播放下一个，关闭Gap标记
                   })
                   get().play(nextIndex, false)
                 } else {
@@ -354,19 +359,20 @@ export const useStore = create<PlayerState>((set, get) => ({
                     currentChunkIndex: nextIndex,
                     currentTime: nextChunk.start_time,
                     isPlaying: false,
+                    isGap: false,
                   })
                   if (noiseEnabled) {
                     audioService.stopNoise()
                   }
                 }
               } else {
-                set({ isPlaying: false })
+                set({ isPlaying: false, isGap: false })
                 if (noiseEnabled) {
                   audioService.stopNoise()
                 }
               }
             } else {
-              set({ isPlaying: false })
+              set({ isPlaying: false, isGap: false })
               if (noiseEnabled) {
                 audioService.stopNoise()
               }
@@ -636,12 +642,12 @@ export const useStore = create<PlayerState>((set, get) => ({
   setGapSound: sound => set({ gapSound: sound }),
 
   tick: delta => {
-    const { isPlaying, currentTime, currentChunkIndex, activeMaterial } = get()
-    if (isPlaying && activeMaterial && currentChunkIndex < activeMaterial.chunks.length) {
+    const { isPlaying, isGap, currentTime, currentChunkIndex, activeMaterial } = get()
+    if (isPlaying && !isGap && activeMaterial && currentChunkIndex < activeMaterial.chunks.length) {
       const currentChunk = activeMaterial.chunks[currentChunkIndex]
-      const chunkEndTime = currentChunk.end_time + get().chunkGap
+      const chunkEndTime = currentChunk.end_time
 
-      // 只在chunk播放期间（包括gap）累加时间
+      // 只有在音频播放期间（通过isGap控制）才累加时间
       if (currentTime < chunkEndTime) {
         set({ currentTime: currentTime + delta })
       }

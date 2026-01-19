@@ -101,23 +101,21 @@
         let chunksWithAudio = 0
 
         materials.forEach(m => {
-          // Estimate JSON string size (includes audioData)
+          // Estimate JSON string size
           const jsonStr = JSON.stringify(m)
           totalTextSize += new Blob([jsonStr]).size
 
           m.chunks?.forEach(c => {
             chunkCount++
-            if (c.audioData && c.audioData.length > 0) {
+            if (c.audioData) {
               chunksWithAudio++
-              // audioData is base64 string, its size is roughly length * 0.75 in bytes
-              totalAudioSize += Math.round(c.audioData.length * 0.75)
+              totalAudioSize += c.audioData.length * 0.75 // Base64 ≈ 75% of binary
             }
           })
         })
 
         return {
-          audioSize:
-            totalAudioSize > 0 ? (totalAudioSize / 1024 / 1024).toFixed(2) + ' MB' : '0 MB',
+          audioSize: (totalAudioSize / 1024 / 1024).toFixed(2) + ' MB',
           textSize: (totalTextSize / 1024 / 1024).toFixed(2) + ' MB',
           chunkCount,
           chunksWithAudio,
@@ -139,42 +137,126 @@
           const storageEstimate = await getStorageEstimate()
 
           let html = `
+            <div style="background: #1e1e1e; padding: 15px; margin-bottom: 20px; border-radius: 8px; border-left: 3px solid #4ec9b0;">
+              <h2 style="color: #4ec9b0; margin: 0 0 10px 0;">存储统计</h2>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">资料数量</div>
+                  <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.materialsCount}</div>
+                </div>
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">Chunk 数量</div>
+                  <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.chunkCount}</div>
+                </div>
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">含音频的 Chunk</div>
+                  <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.chunksWithAudio}</div>
+                </div>
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">音频数据</div>
+                  <div style="color: #ce9178; font-size: 18px; font-weight: bold;">${stats.audioSize}</div>
+                </div>
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">文本数据</div>
+                  <div style="color: #569cd6; font-size: 18px; font-weight: bold;">${stats.textSize}</div>
+                </div>
+                ${
+                  storageEstimate
+                    ? `
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">已用/配额</div>
+                  <div style="color: #dcdcaa; font-size: 18px; font-weight: bold;">${storageEstimate.percent}</div>
+                </div>
+                `
+                    : ''
+                }
+              </div>
+            </div>
+            <h2>共 ${sorted.length} 个 Materials</h2>
+          `
+
+          sorted.forEach((m, i) => {
+            const isLatest = i === 0
+            html += `
+            <div class="material ${isLatest ? 'latest' : ''}">
+              ${isLatest ? '<strong>[最新]</strong> ' : ''}
+              <strong>ID:</strong> ${m.id}<br>
+              <strong>标题:</strong> ${m.title || 'N/A'}<br>
+              <strong>创建时间:</strong> ${new Date(m.createdAt).toLocaleString()}<br>
+              <strong>原文:</strong> <pre>${m.original_text || 'N/A'}</pre>
+              <strong>完整数据:</strong> <pre>${JSON.stringify(
+                m,
+                (key, value) => {
+                  if (key === 'audioData' && typeof value === 'string') {
+                    return value.length > 20 ? value.substring(0, 20) + '...' : value
+                  }
+                  return value
+                },
+                2
+              )}</pre>
+            </div>
+          `
+          })
+          displayResults(html)
+        } catch (e) {
+          displayResults(`<p style="color: #f48771;">错误: ${e.message}</p>`)
+        }
+      }
+
+      async function queryLatestMaterial() {
+        try {
+          const materials = await getAllMaterials()
+          const sorted = materials.sort((a, b) => b.createdAt - a.createdAt)
+          const latest = sorted[0]
+
+          if (!latest) {
+            displayResults('<p>没有找到任何 materials</p>')
+            return
+          }
+
+          // Calculate storage stats
+          const stats = calculateDataSize(materials)
+          const storageEstimate = await getStorageEstimate()
+
+          // 检查 chunks 的 text 拼接是否等于 original_text
+          const chunksText = latest.chunks?.map(c => c.text).join(' ') || ''
+          const originalText = latest.original_text || ''
+          const isMatching = chunksText.trim() === originalText.trim()
+
+          let html = `
           <div style="background: #1e1e1e; padding: 15px; margin-bottom: 20px; border-radius: 8px; border-left: 3px solid #4ec9b0;">
-            <h2 style="color: #4ec9b0; margin: 0 0 15px 0;">存储统计</h2>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px;">
+            <h2 style="color: #4ec9b0; margin: 0 0 10px 0;">存储统计</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
               <div>
-                <div style="color: #6a9955; font-size: 11px;">资料数量</div>
-                <div style="color: #d4d4d4; font-size: 20px; font-weight: bold;">${stats.materialsCount}</div>
+                <div style="color: #6a9955; font-size: 12px;">资料数量</div>
+                <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.materialsCount}</div>
               </div>
               <div>
-                <div style="color: #6a9955; font-size: 11px;">Chunk 数量</div>
-                <div style="color: #d4d4d4; font-size: 20px; font-weight: bold;">${stats.chunkCount}</div>
+                <div style="color: #6a9955; font-size: 12px;">Chunk 数量</div>
+                <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.chunkCount}</div>
               </div>
               <div>
-                <div style="color: #6a9955; font-size: 11px;">有音频</div>
-                <div style="color: #d4d4d4; font-size: 20px; font-weight: bold;">${stats.chunksWithAudio}</div>
+                <div style="color: #6a9955; font-size: 12px;">含音频的 Chunk</div>
+                <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.chunksWithAudio}</div>
               </div>
               <div>
-                <div style="color: #6a9955; font-size: 11px;">音频数据</div>
-                <div style="color: #ce9178; font-size: 20px; font-weight: bold;">${stats.audioSize}</div>
+                <div style="color: #6a9955; font-size: 12px;">音频数据</div>
+                <div style="color: #ce9178; font-size: 18px; font-weight: bold;">${stats.audioSize}</div>
               </div>
               <div>
-                <div style="color: #6a9955; font-size: 11px;">JSON 总大小</div>
-                <div style="color: #569cd6; font-size: 20px; font-weight: bold;">${stats.textSize}</div>
+                <div style="color: #6a9955; font-size: 12px;">文本数据</div>
+                <div style="color: #569cd6; font-size: 18px; font-weight: bold;">${stats.textSize}</div>
               </div>
               ${
                 storageEstimate
                   ? `
               <div>
-                <div style="color: #6a9955; font-size: 11px;">已用/配额</div>
-                <div style="color: #dcdcaa; font-size: 20px; font-weight: bold;">${storageEstimate.percent}</div>
+                <div style="color: #6a9955; font-size: 12px;">已用/配额</div>
+                <div style="color: #dcdcaa; font-size: 18px; font-weight: bold;">${storageEstimate.percent}</div>
               </div>
               `
                   : ''
               }
-            </div>
-            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333; font-size: 11px; color: #6a9955;">
-              提示: JSON 总大小包含音频数据(base64)，通常音频占总大小的 90% 以上
             </div>
           </div>
           <h2>最新 Material</h2>

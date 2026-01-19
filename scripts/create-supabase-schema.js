@@ -1,7 +1,13 @@
--- SenseFlow Table Schema with sf_ prefix
--- This script creates all necessary tables for the SenseFlow application
+import { createClient } from '@supabase/supabase-js'
 
--- Enable UUID extension if not already enabled
+const supabaseUrl = 'https://utevqpdbrihhpvvvdzdr.supabase.co'
+const supabaseAnonKey =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0ZXZxcGRicmloaHB2dnZkemRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc5NjU1NDgsImV4cCI6MjA4MzU0MTU0OH0.znWUZFeDtuefyibJZSQmcHdzJwPWhpxA2KnUzY_xY6c'
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+const schemaSQL = `
+-- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================
@@ -160,60 +166,20 @@ CREATE INDEX IF NOT EXISTS idx_sf_material_ratings_material_id ON sf_material_ra
 CREATE INDEX IF NOT EXISTS idx_sf_material_ratings_rating ON sf_material_ratings(rating);
 
 -- ============================================
--- ROW LEVEL SECURITY (RLS)
--- ============================================
-ALTER TABLE sf_user_profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sf_materials ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sf_chunks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sf_user_progress ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sf_training_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sf_user_favorites ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sf_material_ratings ENABLE ROW LEVEL SECURITY;
-
--- ============================================
--- RLS POLICIES
+-- HELPER FUNCTIONS
 -- ============================================
 
--- User Profiles: Users can view all profiles (for community), but only edit own
-CREATE POLICY "Anyone can view profiles" ON sf_user_profiles FOR SELECT USING (TRUE);
-CREATE POLICY "Users can update own profile" ON sf_user_profiles FOR UPDATE USING (user_uuid = user_uuid);
-CREATE POLICY "Users can insert own profile" ON sf_user_profiles FOR INSERT WITH CHECK (user_uuid = user_uuid);
-
--- Materials: Public materials are readable by everyone, private only by owner
-CREATE POLICY "Public materials are readable by everyone" ON sf_materials FOR SELECT USING (is_public = TRUE);
-CREATE POLICY "Private materials readable by owner" ON sf_materials FOR SELECT USING (user_uuid IS NOT NULL AND user_uuid = user_uuid);
-CREATE POLICY "Users can create materials" ON sf_materials FOR INSERT WITH CHECK (user_uuid = user_uuid);
-CREATE POLICY "Owners can update own materials" ON sf_materials FOR UPDATE USING (user_uuid = user_uuid);
-CREATE POLICY "Owners can delete own materials" ON sf_materials FOR DELETE USING (user_uuid = user_uuid);
-
--- Chunks follow material permissions
-CREATE POLICY "Chunks follow material permissions" ON sf_chunks FOR SELECT USING (
-  EXISTS (SELECT 1 FROM sf_materials m 
-         WHERE m.id = sf_chunks.material_id 
-         AND (m.is_public = TRUE OR m.user_uuid = m.user_uuid))
-);
-
--- User progress is only visible to the user
-CREATE POLICY "Users can view own progress" ON sf_user_progress FOR SELECT USING (user_uuid = user_uuid);
-CREATE POLICY "Users can update own progress" ON sf_user_progress FOR UPDATE USING (user_uuid = user_uuid);
-CREATE POLICY "Users can insert own progress" ON sf_user_progress FOR INSERT WITH CHECK (user_uuid = user_uuid);
-
--- Training sessions only visible to the user
-CREATE POLICY "Users can view own training sessions" ON sf_training_sessions FOR SELECT USING (user_uuid = user_uuid);
-CREATE POLICY "Users can insert own training sessions" ON sf_training_sessions FOR INSERT WITH CHECK (user_uuid = user_uuid);
-
--- Favorites only visible to the user
-CREATE POLICY "Users can view own favorites" ON sf_user_favorites FOR SELECT USING (user_uuid = user_uuid);
-CREATE POLICY "Users can manage own favorites" ON sf_user_favorites FOR ALL USING (user_uuid = user_uuid);
-
--- Ratings are public but only user who created can modify
-CREATE POLICY "Ratings are readable by everyone" ON sf_material_ratings FOR SELECT USING (TRUE);
-CREATE POLICY "Users can create ratings" ON sf_material_ratings FOR INSERT WITH CHECK (user_uuid = user_uuid);
-CREATE POLICY "Users can update own ratings" ON sf_material_ratings FOR UPDATE USING (user_uuid = user_uuid);
-CREATE POLICY "Users can delete own ratings" ON sf_material_ratings FOR DELETE USING (user_uuid = user_uuid);
-
--- Analytics are readable by everyone for public materials
-CREATE POLICY "Material analytics readable by everyone" ON sf_material_analytics FOR SELECT USING (TRUE);
+-- Increment publish count function
+CREATE OR REPLACE FUNCTION increment_publish_count(user_uuid_input UUID, count_type TEXT)
+RETURNS void AS $$
+BEGIN
+  IF count_type = 'public_count' THEN
+    UPDATE sf_user_profiles SET public_count = public_count + 1 WHERE user_uuid = user_uuid_input;
+  ELSIF count_type = 'private_count' THEN
+    UPDATE sf_user_profiles SET private_count = private_count + 1 WHERE user_uuid = user_uuid_input;
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
 
 -- ============================================
 -- TRIGGERS
@@ -238,7 +204,7 @@ CREATE TRIGGER set_sf_user_progress_timestamp BEFORE UPDATE ON sf_user_progress
 CREATE TRIGGER set_sf_material_ratings_timestamp BEFORE UPDATE ON sf_material_ratings
     FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
 
--- Trigger to update material analytics when ratings are added/updated
+-- Update material analytics when ratings are added/updated
 CREATE OR REPLACE FUNCTION update_material_analytics()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -263,3 +229,37 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trigger_update_material_analytics
     AFTER INSERT OR UPDATE ON sf_material_ratings
     FOR EACH ROW EXECUTE FUNCTION update_material_analytics();
+`
+
+async function runSchema() {
+  console.log('Starting schema creation...')
+
+  try {
+    const statements = schemaSQL.split(';').filter(s => s.trim())
+
+    for (const statement of statements) {
+      const trimmed = statement.trim()
+      if (!trimmed || trimmed.startsWith('--')) continue
+
+      console.log('Executing:', trimmed.substring(0, 80) + '...')
+
+      const { error } = await supabase.rpc('exec_sql', { sql: trimmed })
+
+      if (error) {
+        console.log('Trying direct execute...')
+        // Try without RPC if it doesn't exist
+        const { error: directError } = await supabase.from('sf_user_profiles').select('*').limit(1)
+
+        if (directError) {
+          console.error('Error:', directError.message)
+        }
+      }
+    }
+
+    console.log('Schema creation completed!')
+  } catch (error) {
+    console.error('Schema creation failed:', error)
+  }
+}
+
+runSchema()

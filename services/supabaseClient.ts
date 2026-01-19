@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = 'https://utevqpdbrihpvvvzdr.supabase.co'
+const supabaseUrl = 'https://utevqpdbrihhpvvvdzdr.supabase.co'
 const supabaseAnonKey =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0ZXZxcGRicmloaHB2dnZkemRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc5NjU1NDgsImV4cCI6MjA4MzU0MTU0OH0.znWUZFeDtuefyibJZSQmcHdzJwPWhpxA2KnUzY_xY6c'
 
@@ -10,25 +10,25 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 export interface Database {
   public: {
     Tables: {
-      sf_users: {
+      sf_user_profiles: {
         Row: {
-          id: string
-          username: string | null
-          avatar_url: string | null
-          preferences: Record<string, any>
+          user_uuid: string
+          nickname: string | null
+          public_count: number
+          private_count: number
           created_at: string
           updated_at: string
         }
         Insert: {
-          id?: string
-          username?: string | null
-          avatar_url?: string | null
-          preferences?: Record<string, any>
+          user_uuid: string
+          nickname?: string | null
+          public_count?: number
+          private_count?: number
         }
         Update: {
-          username?: string | null
-          avatar_url?: string | null
-          preferences?: Record<string, any>
+          nickname?: string | null
+          public_count?: number
+          private_count?: number
         }
       }
       sf_materials: {
@@ -42,8 +42,11 @@ export interface Database {
           difficulty: 'Easy' | 'Medium' | 'Hard' | 'Insane'
           provider_type: 'edge' | 'openai' | 'local' | 'gemini' | 'deepseek'
           tags: string[]
+          user_uuid: string | null
+          compressed_data: string | null
+          original_size: number | null
+          compressed_size: number | null
           is_public: boolean
-          author_id: string | null
           created_at: string
           updated_at: string
         }
@@ -57,8 +60,11 @@ export interface Database {
           difficulty: 'Easy' | 'Medium' | 'Hard' | 'Insane'
           provider_type: 'edge' | 'openai' | 'local' | 'gemini' | 'deepseek'
           tags?: string[]
+          user_uuid?: string | null
+          compressed_data?: string | null
+          original_size?: number | null
+          compressed_size?: number | null
           is_public?: boolean
-          author_id?: string | null
         }
         Update: {
           title?: string
@@ -69,8 +75,11 @@ export interface Database {
           difficulty?: 'Easy' | 'Medium' | 'Hard' | 'Insane'
           provider_type?: 'edge' | 'openai' | 'local' | 'gemini' | 'deepseek'
           tags?: string[]
+          user_uuid?: string | null
+          compressed_data?: string | null
+          original_size?: number | null
+          compressed_size?: number | null
           is_public?: boolean
-          author_id?: string | null
         }
       }
       sf_chunks: {
@@ -82,6 +91,7 @@ export interface Database {
           translation: string | null
           start_time: number
           end_time: number
+          speaker: string | null
           created_at: string
         }
         Insert: {
@@ -92,6 +102,7 @@ export interface Database {
           translation?: string | null
           start_time: number
           end_time: number
+          speaker?: string | null
         }
         Update: {
           material_id?: string
@@ -100,12 +111,13 @@ export interface Database {
           translation?: string | null
           start_time?: number
           end_time?: number
+          speaker?: string | null
         }
       }
       sf_user_progress: {
         Row: {
           id: string
-          user_id: string
+          user_uuid: string
           material_id: string
           chunks_attempted: string[]
           chunks_completed: string[]
@@ -119,7 +131,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          user_id: string
+          user_uuid: string
           material_id: string
           chunks_attempted?: string[]
           chunks_completed?: string[]
@@ -142,7 +154,7 @@ export interface Database {
       sf_training_sessions: {
         Row: {
           id: string
-          user_id: string
+          user_uuid: string
           material_id: string
           start_time: string
           end_time: string | null
@@ -156,7 +168,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          user_id: string
+          user_uuid: string
           material_id: string
           start_time?: string
           end_time?: string | null
@@ -180,13 +192,13 @@ export interface Database {
       sf_user_favorites: {
         Row: {
           id: string
-          user_id: string
+          user_uuid: string
           material_id: string
           created_at: string
         }
         Insert: {
           id?: string
-          user_id: string
+          user_uuid: string
           material_id: string
         }
         Update: Record<string, never>
@@ -194,7 +206,7 @@ export interface Database {
       sf_material_ratings: {
         Row: {
           id: string
-          user_id: string
+          user_uuid: string
           material_id: string
           rating: number
           review: string | null
@@ -203,7 +215,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          user_id: string
+          user_uuid: string
           material_id: string
           rating: number
           review?: string | null

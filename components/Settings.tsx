@@ -28,6 +28,8 @@ import {
 } from 'lucide-react'
 import { Button } from './ui/Button'
 import { translations } from '../services/translations'
+import { userIdentityService, UserQuota } from '../services/userIdentityService'
+import { Copy, User, Users, Globe2, Lock } from 'lucide-react'
 
 export const Settings = () => {
   const {
@@ -72,6 +74,14 @@ export const Settings = () => {
   } | null>(null)
 
   const t = translations[settings.language]
+
+  // Community Identity State
+  const [userUuid, setUserUuid] = React.useState('')
+  const [nickname, setNickname] = React.useState('')
+  const [quota, setQuota] = React.useState<UserQuota | null>(null)
+  const [isLoadingProfile, setIsLoadingProfile] = React.useState(true)
+  const [isSavingNickname, setIsSavingNickname] = React.useState(false)
+  const [nicknameError, setNicknameError] = React.useState('')
 
   const handleSave = () => {
     updateSettings(localState)
@@ -274,6 +284,25 @@ export const Settings = () => {
     setLocalState(prev => ({ ...prev, language: settings.language }))
   }, [settings.language])
 
+  // Load community identity profile
+  React.useEffect(() => {
+    const loadProfile = async () => {
+      setIsLoadingProfile(true)
+      try {
+        const uuid = userIdentityService.getOrCreateUUID()
+        setUserUuid(uuid)
+        setNickname(userIdentityService.getNickname() || '')
+        const q = await userIdentityService.getQuota()
+        setQuota(q)
+      } catch (error) {
+        console.error('Failed to load profile:', error)
+      } finally {
+        setIsLoadingProfile(false)
+      }
+    }
+    loadProfile()
+  }, [])
+
   // Fetch CosyVoice speakers when CosyVoice mode is selected
   React.useEffect(() => {
     const fetchSpeakers = async () => {
@@ -298,6 +327,32 @@ export const Settings = () => {
     }
     fetchSpeakers()
   }, [localState.ttsMode, localState.cosyvoiceApiUrl])
+
+  // Save nickname handler
+  const handleSaveNickname = async () => {
+    if (!nickname.trim()) {
+      setNicknameError('昵称不能为空')
+      return
+    }
+    if (nickname.length > 50) {
+      setNicknameError('昵称最长50个字符')
+      return
+    }
+    setIsSavingNickname(true)
+    setNicknameError('')
+    try {
+      await userIdentityService.updateNickname(nickname.trim())
+    } catch (error) {
+      setNicknameError('保存失败，请重试')
+    } finally {
+      setIsSavingNickname(false)
+    }
+  }
+
+  // Copy UUID handler
+  const handleCopyUuid = () => {
+    navigator.clipboard.writeText(userUuid)
+  }
 
   return (
     <div className="p-8 max-w-4xl mx-auto space-y-8 animate-fade-in">
@@ -1304,6 +1359,129 @@ export const Settings = () => {
               )}
             </div>
           </div>
+        </div>
+
+        {/* Community Identity */}
+        <div className="bg-surface rounded-xl border border-border p-6 space-y-6">
+          <div className="flex items-center gap-3 border-b border-border pb-4">
+            <User className="w-5 h-5 text-indigo-400" />
+            <h3 className="text-lg font-semibold text-primary dark:text-white">社区身份</h3>
+          </div>
+
+          {isLoadingProfile ? (
+            <div className="flex items-center justify-center py-8">
+              <RefreshCw className="w-5 h-5 text-zinc-400 animate-spin" />
+              <span className="ml-2 text-sm text-zinc-500">加载中...</span>
+            </div>
+          ) : (
+            <div className="grid gap-6">
+              {/* UUID */}
+              <div>
+                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  用户 ID (UUID)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={userUuid}
+                    readOnly
+                    className="flex-1 bg-background border border-border rounded-lg py-2 px-4 text-primary dark:text-white font-mono text-sm"
+                  />
+                  <button
+                    onClick={handleCopyUuid}
+                    className="px-4 py-2 bg-secondary text-zinc-600 dark:text-zinc-300 rounded-lg hover:bg-secondary/80 transition flex items-center gap-2 text-sm"
+                  >
+                    <Copy className="w-4 h-4" />
+                    复制
+                  </button>
+                </div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  此 ID 用于标识您在社区中的身份，发布资料时使用
+                </p>
+              </div>
+
+              {/* Nickname */}
+              <div>
+                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  昵称
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={nickname}
+                    onChange={e => setNickname(e.target.value)}
+                    placeholder="输入您的昵称"
+                    className="flex-1 bg-background border border-border rounded-lg py-2 px-4 text-primary dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                  />
+                  <button
+                    onClick={handleSaveNickname}
+                    disabled={isSavingNickname}
+                    className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition flex items-center gap-2 text-sm font-medium disabled:opacity-50"
+                  >
+                    {isSavingNickname ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    保存
+                  </button>
+                </div>
+                {nicknameError && <p className="text-xs text-rose-500 mt-1">{nicknameError}</p>}
+              </div>
+
+              {/* Quota Display */}
+              {quota && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Globe2 className="w-4 h-4 text-emerald-500" />
+                      <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                        Public 配额
+                      </span>
+                    </div>
+                    <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                      {quota.public.used} / {quota.public.limit}
+                    </div>
+                    <div className="mt-2 h-1.5 bg-emerald-500/20 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 rounded-full transition-all"
+                        style={{
+                          width: `${Math.min((quota.public.used / quota.public.limit) * 100, 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Lock className="w-4 h-4 text-blue-500" />
+                      <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                        Private 配额
+                      </span>
+                    </div>
+                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                      {quota.private.used} / {quota.private.limit}
+                    </div>
+                    <div className="mt-2 h-1.5 bg-blue-500/20 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-500 rounded-full transition-all"
+                        style={{
+                          width: `${Math.min((quota.private.used / quota.private.limit) * 100, 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-4 bg-secondary/30 rounded-lg border border-border">
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  <strong>Public:</strong> 公开分享给所有用户，每个用户最多 100 条<br />
+                  <strong>Private:</strong> 仅自己可见的多设备同步，每个用户最多 50 条
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-3 pt-4">

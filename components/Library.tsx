@@ -43,6 +43,9 @@ import { CosyVoiceService } from '../services/cosyvoiceService'
 import { WhisperXService } from '../services/whisperxService'
 import { arrayBufferToBase64, extractAudioSegment } from '../services/audioUtils'
 import { storageManager } from '../services/storageManager'
+import { communityService } from '../services/communityService'
+import { userIdentityService, UserQuota } from '../services/userIdentityService'
+import { Globe, Lock, Share2, Upload } from 'lucide-react'
 
 export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
   const { materials, setMaterial, addMaterial, deleteMaterial, settings } = useStore()
@@ -68,6 +71,15 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
     null
   )
   const [regenError, setRegenError] = useState<string | null>(null)
+
+  // Publish State
+  const [publishMaterial, setPublishMaterial] = useState<StudyMaterial | null>(null)
+  const [publishType, setPublishType] = useState<'public' | 'private'>('public')
+  const [publishQuota, setPublishQuota] = useState<UserQuota | null>(null)
+  const [isPublishing, setIsPublishing] = useState(false)
+  const [publishProgress, setPublishProgress] = useState<number | null>(null)
+  const [publishError, setPublishError] = useState<string | null>(null)
+  const [publishSuccess, setPublishSuccess] = useState(false)
 
   const handlePlay = (id: string) => {
     setMaterial(id)
@@ -791,10 +803,202 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
     )
   }
 
+  // Publish Functions
+  const openPublishModal = async (material: StudyMaterial) => {
+    setPublishMaterial(material)
+    setPublishType('public')
+    setPublishError(null)
+    setPublishSuccess(false)
+
+    const quota = await userIdentityService.getQuota()
+    setPublishQuota(quota)
+  }
+
+  const closePublishModal = () => {
+    setPublishMaterial(null)
+    setPublishError(null)
+    setPublishSuccess(false)
+    setPublishProgress(null)
+  }
+
+  const handlePublish = async () => {
+    if (!publishMaterial) return
+
+    const canPublish = await userIdentityService.canPublish(publishType)
+    if (!canPublish) {
+      setPublishError(
+        publishType === 'public' ? '已达到 Public 发布上限 (100)' : '已达到 Private 发布上限 (50)'
+      )
+      return
+    }
+
+    setIsPublishing(true)
+    setPublishProgress(0)
+
+    try {
+      await communityService.publishMaterial(publishMaterial, publishType, (current, total) => {
+        setPublishProgress((current / total) * 100)
+      })
+      setPublishSuccess(true)
+    } catch (err: any) {
+      setPublishError(err.message || '发布失败，请重试')
+    } finally {
+      setIsPublishing(false)
+    }
+  }
+
+  // Publish Modal
+  const renderPublishModal = () => {
+    if (!publishMaterial) return null
+
+    const quota = publishQuota
+    const targetQuota = publishType === 'public' ? quota?.public : quota?.private
+    const canPublish = targetQuota ? targetQuota.used < targetQuota.limit : true
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+        <div className="bg-surface rounded-xl border border-border p-6 w-full max-w-md mx-4 shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                <Share2 className="w-5 h-5 text-emerald-500" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">发布到社区</h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 truncate max-w-[200px]">
+                  {publishMaterial.title}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={closePublishModal}
+              className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Success State */}
+          {publishSuccess ? (
+            <div className="py-8 text-center">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-4">
+                <Check className="w-8 h-8 text-emerald-500" />
+              </div>
+              <h4 className="text-lg font-semibold text-zinc-900 dark:text-white mb-2">
+                发布成功！
+              </h4>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                您的资料已{publishType === 'public' ? '公开' : '私密'}发布到社区
+              </p>
+              <Button onClick={closePublishModal} className="mt-6 w-full">
+                完成
+              </Button>
+            </div>
+          ) : (
+            <>
+              {/* Type Selection */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
+                  发布类型
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setPublishType('public')}
+                    className={`p-4 rounded-lg border transition-all ${
+                      publishType === 'public'
+                        ? 'bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-white dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:border-emerald-500/50'
+                    }`}
+                  >
+                    <Globe className="w-5 h-5 mx-auto mb-2" />
+                    <div className="text-sm font-medium">Public</div>
+                    <div className="text-xs opacity-70 mt-1">
+                      {quota?.public.used || 0}/{quota?.public.limit || 100}
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setPublishType('private')}
+                    className={`p-4 rounded-lg border transition-all ${
+                      publishType === 'private'
+                        ? 'bg-blue-500/10 border-blue-500 text-blue-600 dark:text-blue-400'
+                        : 'bg-white dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:border-blue-500/50'
+                    }`}
+                  >
+                    <Lock className="w-5 h-5 mx-auto mb-2" />
+                    <div className="text-sm font-medium">Private</div>
+                    <div className="text-xs opacity-70 mt-1">
+                      {quota?.private.used || 0}/{quota?.private.limit || 50}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Error */}
+              {publishError && (
+                <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-500/10 rounded-lg border border-rose-200 dark:border-rose-500/20">
+                  <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                    <AlertCircle className="w-4 h-4" />
+                    <span className="text-sm">{publishError}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <Button variant="secondary" onClick={closePublishModal} className="flex-1">
+                  取消
+                </Button>
+                <Button
+                  onClick={handlePublish}
+                  disabled={isPublishing || !canPublish}
+                  className="flex-1 gap-2"
+                >
+                  {isPublishing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      发布中...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      确定发布
+                    </>
+                  )}
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* Progress */}
+          {isPublishing && publishProgress !== null && (
+            <div className="mt-6 pt-6 border-t border-border">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-zinc-600 dark:text-zinc-400">正在压缩和上传...</span>
+                <span className="text-sm font-mono text-emerald-500">
+                  {Math.round(publishProgress)}%
+                </span>
+              </div>
+              <div className="h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                  style={{ width: `${publishProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <>
       {/* Voice Regeneration Modal */}
       {renderVoiceRegenModal()}
+
+      {/* Publish Modal */}
+      {renderPublishModal()}
 
       <div className="p-8 space-y-8 animate-fade-in pb-24">
         {/* Header */}
@@ -1048,6 +1252,16 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
                         title="重新生成音频"
                       >
                         <RefreshCw className="w-4 h-4" />
+                      </button>
+                    )}
+                    {/* Publish Button */}
+                    {item.ttsGenerated && (
+                      <button
+                        onClick={() => openPublishModal(item)}
+                        className="p-1.5 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                        title="发布到社区"
+                      >
+                        <Share2 className="w-4 h-4" />
                       </button>
                     )}
                     {/* Delete Button */}

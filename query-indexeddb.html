@@ -1,0 +1,243 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>SenseFlow IndexedDB Query</title>
+    <style>
+      body {
+        font-family: monospace;
+        padding: 20px;
+        background: #1e1e1e;
+        color: #d4d4d4;
+      }
+      h1 {
+        color: #4ec9b0;
+      }
+      .material {
+        background: #252526;
+        padding: 15px;
+        margin: 10px 0;
+        border-left: 3px solid #4ec9b0;
+      }
+      .latest {
+        border-left-color: #ce9178;
+        background: #2d2d30;
+      }
+      pre {
+        background: #1e1e1e;
+        padding: 10px;
+        overflow-x: auto;
+      }
+      button {
+        background: #4ec9b0;
+        border: none;
+        padding: 10px 20px;
+        cursor: pointer;
+        margin: 5px;
+      }
+      button:hover {
+        background: #3db89a;
+      }
+      .section {
+        margin: 20px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SenseFlow IndexedDB Query Tool</h1>
+
+    <div class="section">
+      <button onclick="queryAllMaterials()">查询所有 Materials</button>
+      <button onclick="queryLatestMaterial()">查询最新 Material</button>
+      <button onclick="exportAllMaterials()">导出所有 JSON</button>
+      <button onclick="clearAllMaterials()">清空所有 Materials</button>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+      let db = null
+
+      function initDB() {
+        return new Promise((resolve, reject) => {
+          const request = indexedDB.open('SenseFlowDB', 1)
+          request.onsuccess = e => {
+            db = e.target.result
+            resolve(db)
+          }
+          request.onerror = () => reject(request.error)
+        })
+      }
+
+      async function getAllMaterials() {
+        await initDB()
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction('materials', 'readonly')
+          const store = tx.objectStore('materials')
+          const request = store.getAll()
+          request.onsuccess = () => resolve(request.result)
+          request.onerror = () => reject(request.error)
+        })
+      }
+
+      function displayResults(html) {
+        document.getElementById('results').innerHTML = html
+      }
+
+      async function queryAllMaterials() {
+        try {
+          const materials = await getAllMaterials()
+          const sorted = materials.sort((a, b) => b.createdAt - a.createdAt)
+
+          let html = `<h2>共 ${sorted.length} 个 Materials</h2>`
+          sorted.forEach((m, i) => {
+            const isLatest = i === 0
+            html += `
+            <div class="material ${isLatest ? 'latest' : ''}">
+              ${isLatest ? '<strong>[最新]</strong> ' : ''}
+              <strong>ID:</strong> ${m.id}<br>
+              <strong>标题:</strong> ${m.title || 'N/A'}<br>
+              <strong>创建时间:</strong> ${new Date(m.createdAt).toLocaleString()}<br>
+              <strong>原文:</strong> <pre>${m.original_text || 'N/A'}</pre>
+              <strong>完整数据:</strong> <pre>${JSON.stringify(
+                m,
+                (key, value) => {
+                  if (key === 'audioData' && typeof value === 'string') {
+                    return value.length > 20 ? value.substring(0, 20) + '...' : value
+                  }
+                  return value
+                },
+                2
+              )}</pre>
+            </div>
+          `
+          })
+          displayResults(html)
+        } catch (e) {
+          displayResults(`<p style="color: #f48771;">错误: ${e.message}</p>`)
+        }
+      }
+
+      async function queryLatestMaterial() {
+        try {
+          const materials = await getAllMaterials()
+          const sorted = materials.sort((a, b) => b.createdAt - a.createdAt)
+          const latest = sorted[0]
+
+          if (!latest) {
+            displayResults('<p>没有找到任何 materials</p>')
+            return
+          }
+
+          // 检查 chunks 的 text 拼接是否等于 original_text
+          const chunksText = latest.chunks?.map(c => c.text).join(' ') || ''
+          const originalText = latest.original_text || ''
+          const isMatching = chunksText.trim() === originalText.trim()
+
+          let html = `
+          <h2>最新 Material</h2>
+          <div class="material latest">
+            <strong>ID:</strong> ${latest.id}<br>
+            <strong>标题:</strong> ${latest.title || 'N/A'}<br>
+            <strong>描述:</strong> ${latest.description || 'N/A'}<br>
+            <strong>创建时间:</strong> ${new Date(latest.createdAt).toLocaleString()}<br>
+            <strong>难度:</strong> ${latest.config?.difficulty || 'N/A'}<br>
+            <strong>标签:</strong> ${(latest.config?.tags || []).join(', ')}<br>
+            <strong>完整性检查:</strong> ${
+              isMatching
+                ? '<span style="color: #4ec9b0;">✓ Chunks 拼接与 original_text 一致</span>'
+                : '<span style="color: #f48771;">✗ Chunks 拼接与 original_text 不一致！</span>'
+            }<br>
+            <strong>原文 (original_text):</strong>
+            <pre style="color: #ce9178; font-size: 16px; padding: 15px; background: #1e1e1e;">${originalText}</pre>
+            <strong>Chunks 拼接结果:</strong>
+            <pre style="color: ${isMatching ? '#4ec9b0' : '#f48771'}; font-size: 14px; padding: 15px; background: #1e1e1e;">${chunksText}</pre>
+            <strong>差异:</strong>
+            <pre style="color: #f48771; font-size: 14px; padding: 15px; background: #1e1e1e;">${!isMatching ? findDiff(originalText, chunksText) : '无差异'}</pre>
+            <strong>分块数量:</strong> ${latest.chunks?.length || 0}<br>
+            <strong>所有分块详情:</strong>
+            <div style="max-height: 400px; overflow-y: auto; background: #1e1e1e; padding: 10px;">
+              ${
+                latest.chunks
+                  ?.map((c, i) => {
+                    const hasWords = c.words && c.words.length > 0
+                    const wordsText = hasWords ? c.words.map(w => w.word).join(' ') : '(no words)'
+                    const textMatchesWords = hasWords && c.text === wordsText
+                    return `
+                  <div style="border-bottom: 1px solid #333; padding: 8px 0;">
+                    <div style="color: #569cd6;">Chunk ${i}:</div>
+                    <div style="color: #ce9178;">text: "${c.text}"</div>
+                    ${hasWords ? `<div style="color: #dcdcaa;">words: "${wordsText}"</div>` : '<div style="color: #6a9955;">words: (empty)</div>'}
+                    ${hasWords && !textMatchesWords ? `<div style="color: #f48771;">⚠️ text 与 words 不匹配！播放器将显示 words</div>` : ''}
+                    ${c.translation ? `<div style="color: #6a9955;">// ${c.translation}</div>` : ''}
+                  </div>
+                `
+                  })
+                  .join('') || 'N/A'
+              }
+            </div>
+            <strong>完整数据:</strong>
+            <pre>${JSON.stringify(
+              latest,
+              (key, value) => {
+                if (key === 'audioData' && typeof value === 'string') {
+                  return value.length > 20 ? value.substring(0, 20) + '...' : value
+                }
+                return value
+              },
+              2
+            )}</pre>
+          </div>
+        `
+          displayResults(html)
+          console.log('Latest material:', latest)
+        } catch (e) {
+          displayResults(`<p style="color: #f48771;">错误: ${e.message}</p>`)
+        }
+      }
+
+      // 简单的差异检测函数
+      function findDiff(text1, text2) {
+        const arr1 = text1.split(' ')
+        const arr2 = text2.split(' ')
+        const missing = arr1.filter(w => !arr2.includes(w))
+        const extra = arr2.filter(w => !arr1.includes(w))
+        return `原文有而 chunks 没有的词: [${missing.join(', ')}]Chunks 有而原文没有的词: [${extra.join(', ')}]`
+      }
+
+      async function exportAllMaterials() {
+        try {
+          const materials = await getAllMaterials()
+          const json = JSON.stringify(materials, null, 2)
+          const blob = new Blob([json], { type: 'application/json' })
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `senseflow-materials-${Date.now()}.json`
+          a.click()
+          displayResults(`<p>已导出 ${materials.length} 个 materials</p>`)
+        } catch (e) {
+          displayResults(`<p style="color: #f48771;">错误: ${e.message}</p>`)
+        }
+      }
+
+      async function clearAllMaterials() {
+        if (!confirm('确定要清空所有 materials 吗？此操作不可恢复！')) return
+        try {
+          await initDB()
+          const tx = db.transaction('materials', 'readwrite')
+          const store = tx.objectStore('materials')
+          store.clear()
+          tx.oncomplete = () => {
+            displayResults('<p style="color: #4ec9b0;">已清空所有 materials</p>')
+          }
+        } catch (e) {
+          displayResults(`<p style="color: #f48771;">错误: ${e.message}</p>`)
+        }
+      }
+
+      // 自动查询最新 material
+      window.onload = () => queryLatestMaterial()
+    </script>
+  </body>
+</html>

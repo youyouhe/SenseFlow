@@ -407,7 +407,7 @@ export const Player = () => {
 
   if (!activeMaterial) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-zinc-400 dark:text-zinc-600">
+      <div className="h-full flex flex-col items-center justify-center text-zinc-500 dark:text-zinc-600">
         <Waves className="w-16 h-16 mb-4 opacity-20" />
         <p>{t.player_empty}</p>
       </div>
@@ -434,14 +434,14 @@ export const Player = () => {
           <div className="bg-surface border border-border rounded-lg p-1 flex gap-1 shadow-sm">
             <button
               onClick={() => setPlayerViewMode('chunk')}
-              className={`p-1.5 rounded transition-all ${playerViewMode === 'chunk' ? 'bg-indigo-500 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200'}`}
+              className={`p-1.5 rounded transition-all ${playerViewMode === 'chunk' ? 'bg-indigo-500 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-200'}`}
               title={t.player_chunk_mode}
             >
               <AlignJustify className="w-4 h-4" />
             </button>
             <button
               onClick={() => setPlayerViewMode('full')}
-              className={`p-1.5 rounded transition-all ${playerViewMode === 'full' ? 'bg-indigo-500 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200'}`}
+              className={`p-1.5 rounded transition-all ${playerViewMode === 'full' ? 'bg-indigo-500 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-200'}`}
               title={t.player_full_mode}
             >
               <AlignLeft className="w-4 h-4" />
@@ -451,7 +451,7 @@ export const Player = () => {
           <div className="bg-surface border border-border rounded-lg p-1 flex gap-1 shadow-sm">
             <button
               onClick={() => setShowTrainingPanel(!showTrainingPanel)}
-              className={`p-1.5 rounded transition-all ${showTrainingPanel ? 'bg-rose-500 text-white shadow-sm' : 'text-zinc-400 hover:text-rose-600 dark:hover:text-rose-300'}`}
+              className={`p-1.5 rounded transition-all ${showTrainingPanel ? 'bg-rose-500 text-white shadow-sm' : 'text-zinc-500 hover:text-rose-600 dark:hover:text-rose-300'}`}
               title={t.player_training_modes || 'Training Modes'}
             >
               <Brain className="w-4 h-4" />
@@ -470,7 +470,7 @@ export const Player = () => {
             </h3>
             <button
               onClick={() => setShowTrainingPanel(false)}
-              className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+              className="text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300"
               title="Close"
             >
               ✕
@@ -647,7 +647,7 @@ export const Player = () => {
                   {isDialogue && speakerName && (
                     <span
                       className={`text-xs font-bold uppercase tracking-wider mb-2 ${
-                        active ? speakerColor : 'text-zinc-400 dark:text-zinc-600'
+                        active ? speakerColor : 'text-zinc-500 dark:text-zinc-600'
                       }`}
                     >
                       {speakerName}
@@ -655,18 +655,18 @@ export const Player = () => {
                   )}
                   <p
                     className={`
-                    text-2xl md:text-4xl font-semibold transition-colors
-                    ${active ? 'text-zinc-900 dark:text-white' : 'text-zinc-400 dark:text-zinc-500'}
-                  `}
+                        text-2xl md:text-4xl font-semibold transition-colors
+                        ${active ? 'text-zinc-900 dark:text-white' : 'text-zinc-600 dark:text-zinc-500'}
+                      `}
                   >
                     {renderTextWithWordHighlighting(chunk, active)}
                   </p>
                   {chunk.translation && settings.showTranslations && (
                     <p
                       className={`
-                      text-base md:text-lg mt-2 font-light transition-colors
-                      ${active ? 'text-zinc-600 dark:text-zinc-300' : 'text-zinc-300 dark:text-zinc-600'}
-                    `}
+                          text-base md:text-lg mt-2 font-light transition-colors
+                          ${active ? 'text-zinc-700 dark:text-zinc-300' : 'text-zinc-500 dark:text-zinc-600'}
+                        `}
                     >
                       {chunk.translation}
                     </p>
@@ -676,7 +676,7 @@ export const Player = () => {
             })
           ) : (
             // --- FULL TEXT MODE ---
-            <div className="text-xl md:text-2xl leading-[2.5] md:leading-[2.5] text-zinc-300 dark:text-zinc-700 font-medium">
+            <div className="text-xl md:text-2xl leading-[2.5] md:leading-[2.5] text-zinc-600 dark:text-zinc-700 font-medium">
               {activeMaterial.chunks.map((chunk, _index) => {
                 const active = isChunkActiveWithGap(chunk)
                 const isDialogue = activeMaterial.config.content_type === 'dialogue'
@@ -724,7 +724,7 @@ export const Player = () => {
                         ${
                           active
                             ? 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-500/20 font-bold'
-                            : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            : 'text-zinc-600 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                         }
                         ${isDialogue ? getSpeakerColor() : ''}
                       `}
@@ -736,7 +736,7 @@ export const Player = () => {
                       <span
                         className={`
                           block text-sm md:text-base font-light -mt-1 mb-2 ml-1
-                          ${active ? 'text-zinc-500 dark:text-zinc-400' : 'text-zinc-400 dark:text-zinc-600'}
+                          ${active ? 'text-zinc-600 dark:text-zinc-400' : 'text-zinc-500 dark:text-zinc-600'}
                         `}
                       >
                         {chunk.translation}
@@ -787,7 +787,7 @@ export const Player = () => {
               <button
                 onClick={() => seek(Math.max(0, currentTime - 5))}
                 title={t.player_rewind || 'Rewind 5s'}
-                className="text-zinc-400 hover:text-indigo-600 dark:hover:text-white transition"
+                className="text-zinc-500 hover:text-indigo-600 dark:hover:text-white transition"
               >
                 <Rewind className="w-6 h-6" />
               </button>
@@ -828,7 +828,7 @@ export const Player = () => {
                   useStore.setState({ isPlaying: false, currentTime: 0, currentChunkIndex: 0 })
                 }}
                 title={t.player_restart || 'Restart from beginning'}
-                className="text-zinc-400 hover:text-indigo-600 dark:hover:text-white transition"
+                className="text-zinc-500 hover:text-indigo-600 dark:hover:text-white transition"
               >
                 <RotateCcw className="w-6 h-6" />
               </button>
@@ -836,7 +836,7 @@ export const Player = () => {
               <button
                 onClick={() => seek(Math.min(duration, currentTime + 5))}
                 title={t.player_forward || 'Forward 5s'}
-                className="text-zinc-400 hover:text-indigo-600 dark:hover:text-white transition"
+                className="text-zinc-500 hover:text-indigo-600 dark:hover:text-white transition"
               >
                 <SkipForward className="w-6 h-6" />
               </button>
@@ -878,7 +878,7 @@ export const Player = () => {
                     title={t.player_gap || 'Gap between chunks'}
                   />
                 </div>
-                <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider w-8">
+                <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider w-8">
                   {chunkGap}s
                 </span>
               </div>
@@ -890,7 +890,7 @@ export const Player = () => {
                   className={`px-2 py-1 rounded text-xs transition ${
                     gapSound === 'beep'
                       ? 'bg-emerald-500/20 text-emerald-600 border border-emerald-500/30'
-                      : 'text-zinc-400 hover:text-zinc-600'
+                      : 'text-zinc-500 hover:text-zinc-600'
                   }`}
                   title={t.player_gap_beep || 'Beep sound'}
                 >
@@ -904,7 +904,7 @@ export const Player = () => {
                   className={`px-2 py-1 rounded text-xs transition ${
                     gapSound === 'silent'
                       ? 'bg-emerald-500/20 text-emerald-600 border border-emerald-500/30'
-                      : 'text-zinc-400 hover:text-zinc-600'
+                      : 'text-zinc-500 hover:text-zinc-600'
                   }`}
                   title={t.player_gap_silent || 'Silent'}
                 >
@@ -931,7 +931,7 @@ export const Player = () => {
                     title={t.player_playback_rate || 'Playback Speed'}
                   />
                 </div>
-                <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider w-10">
+                <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider w-10">
                   {playbackRate.toFixed(1)}x
                 </span>
               </div>
@@ -1019,7 +1019,7 @@ export const Player = () => {
                   {noiseEnabled ? (
                     <Waves className="w-4 h-4 text-rose-500" />
                   ) : (
-                    <VolumeX className="w-4 h-4 text-zinc-400" />
+                    <VolumeX className="w-4 h-4 text-zinc-500" />
                   )}
                 </div>
 
@@ -1036,7 +1036,7 @@ export const Player = () => {
                     title={t.player_voice_volume || 'Voice Volume'}
                   />
                 </div>
-                <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">
+                <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
                   {t.player_noise_label}
                 </span>
 

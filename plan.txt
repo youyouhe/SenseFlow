@@ -1,0 +1,169 @@
+这份报告汇集了我们所有的头脑风暴，将其转化为一份**可执行的战略蓝图**。这份文档将指导您从 Day 1 开始的开发与运营。
+
+---
+
+# 🚀 ChunkMaster (意群大师) 产品实施与商业执行报告
+
+**版本：** v1.0
+**日期：** 2026-01-13
+**架构核心：** Tauri (客户端) + Supabase (云服务) + BYOK (用户自带模型)
+**战略定位：** 零边际成本的英语听觉认知训练平台
+
+---
+
+## 第一部分：产品定义 (Product Definition)
+
+### 1.1 核心理念
+ChunkMaster 不仅仅是一个“复读机”，它是一个基于**“意群 (Sense Groups)”** 理论的**“听觉认知健身房”**。
+通过**视觉切分**（降低阅读负荷）与**听觉干扰训练**（提高听力鲁棒性），解决英语学习者“听得懂单词，听不懂长句”的痛点。
+
+### 1.2 目标用户
+*   **雅思/托福备考者：** 需要精听，适应复杂长难句。
+*   **进阶英语学习者：** 想要突破听力瓶颈，适应真实嘈杂环境。
+*   **极客/隐私主义者：** 喜欢折腾本地 AI，注重数据隐私。
+
+---
+
+## 第二部分：技术架构方案 (Technical Architecture)
+
+本架构设计的核心原则是：**轻量化、插件化、零服务器计算成本**。
+
+### 2.1 技术栈选型 (The Stack)
+
+| 模块 | 选型 | 理由 |
+| :--- | :--- | :--- |
+| **App 框架** | **Tauri v2** (Rust + WebView) | 性能极高，安装包小 (<15MB)，安全，原生能力强。 |
+| **前端框架** | **React + Vite + TypeScript** | 生态最成熟，开发效率最高。 |
+| **UI 组件库** | **Shadcn/ui + Tailwind CSS** | 现代化、极简、专业感强。 |
+| **状态管理** | **Zustand** | 管理播放器复杂状态（进度、音量、意群索引）的最佳选择。 |
+| **后端服务** | **Supabase** | 仅用于 Auth（鉴权）和 DB（存 JSON 数据），几乎免费。 |
+| **音频引擎** | **Howler.js** (Web Audio API) | 前端混音（人声+噪音），无需后端处理。 |
+
+### 2.2 核心模式：Provider Adapter (适配器模式)
+
+前端不绑定死任何一家 AI，而是通过一个标准接口层（Adapter）适配所有服务。
+
+*   **LLM Provider (负责分词/生成):**
+    *   `OpenAI` / `DeepSeek` / `Gemini` (Cloud API)
+    *   `Ollama` (Local API, `localhost:11434`)
+*   **TTS Provider (负责发音):**
+    *   `Edge-TTS` (内置免费，微软接口)
+    *   `OpenAI TTS` (Cloud API, 需 Key, 极佳体验)
+    *   `Local Connector` (连接 Docker 里的 CosyVoice/WhisperX)
+
+### 2.3 数据结构标准 (The "Recipe")
+
+社区分享的核心不是音频文件，而是**“配方 (Recipe)”**。这极大地降低了带宽和存储成本。
+
+```typescript
+// 存入 Supabase 的 JSON 结构
+interface StudyMaterial {
+  id: string;
+  title: string;
+  original_text: string;
+  // 意群数据 (核心)
+  chunks: {
+    text: string;
+    start_time?: number; // 如果是 Edge-TTS/OpenAI，生成后会回填此项
+    end_time?: number;
+  }[];
+  // 推荐配置 (元数据)
+  config: {
+    recommended_speed: number;
+    recommended_noise_level: number;
+    provider_type: "edge" | "openai" | "local";
+  };
+}
+```
+
+---
+
+## 第三部分：功能实施路线图 (Implementation Roadmap)
+
+### 阶段一：单机 MVP (The Tool) - 预计 2 周
+**目标：** 开发一个离线也能用的强力播放器。
+1.  **工程搭建：** Tauri + React 初始化。
+2.  **Edge-TTS 集成：** 实现无需 Key 的免费朗读，解析 `WordBoundary` 获取时间戳。
+3.  **核心播放器：**
+    *   实现双轨混音（TTS + 本地噪音 MP3）。
+    *   实现“意群间隙 (Gap)”控制。
+    *   实现“卡拉 OK”高亮滚动。
+4.  **LLM 接入：** 允许用户填入 DeepSeek/OpenAI Key，实现文本一键分词。
+
+### 阶段二：云端互联 (The Platform) - 预计 2 周
+**目标：** 接入 Supabase，打通社区。
+1.  **用户系统：** 集成 Supabase Auth (Email/GitHub 登录)。
+2.  **云存储：** 允许用户将本地生成的“配方” Upload 到 Supabase `public_materials` 表。
+3.  **广场页：** 用户可以浏览、搜索、下载别人分享的 JSON 配方，并在本地通过 Edge-TTS 重现声音。
+
+### 阶段三：极客扩展 (The Ecosystem) - 持续迭代
+1.  **Local API 标准化：** 发布《ChunkMaster Local API 文档》，定义 `/v1/synthesize` 接口规范。
+2.  **CosyVoice + WhisperX 集成：**
+    *   **架构：** FastAPI (Python) 作为桥接层，连接前端 (TypeScript) 与 Python AI 服务
+    *   **CosyVoice：** 通过 Gradio Client 调用，生成高质量中文语音
+        - API: `/generate_audio` (Gradio)
+        - 参数: `tts_text`, `mode_checkbox_group`, `sft_dropdown`, `speed`
+        - 返回: 音频文件路径
+    *   **WhisperX：** 对 CosyVoice 生成的音频进行词级时间戳对齐
+        - 功能: Word-level timestamps (强制对齐)
+        - 流程: `transcribe()` → `align()` → 返回 `[{word, start, end}]`
+        - 解决: CosyVoice 不提供精确时间戳的问题
+    *   **数据流：**
+        ```
+        前端: CosyVoiceService.generateAudio(text)
+          → POST /api/tts/generate
+          → Python: CosyVoice生成音频 → WhisperX对齐
+          → 返回: { audio_base64, words: [{word, start, end}] }
+          → 前端: 解码音频 + 逐词高亮播放
+        ```
+    *   **词级高亮：** 扩展 `Chunk` 接口添加 `words?: WordTimestamp[]`
+    *   **Docker 部署：** 用户一键启动本地服务
+        - 后端服务端口: `8000`
+        - CosyVoice 服务: `http://192.168.8.107:50000`
+        - 配置: 用户在设置中填写 API URL
+
+---
+
+## 第四部分：商业运作策略 (Business Strategy)
+
+### 4.1 商业模式：Freemium (免费增值) + BYOK
+*   **Free (免费版):**
+    *   使用 Edge-TTS (免费)。
+    *   手动编辑文本。
+    *   浏览社区内容。
+*   **Pro (会员版 - 比如 $5/月 或 $29 买断):**
+    *   **Cloud Sync:** 在不同电脑间同步学习进度和收藏。
+    *   **Pro Presets:** 官方精选的“高难度训练集”（如：含嘈杂背景音的托福听力真题 JSON）。
+    *   **AI Coach:** 预设高级 Prompt 模板（如“模拟面试官”），一键生成特定场景对话。
+
+### 4.2 增长策略 (Go-to-Market)
+1.  **“开源”营销：**
+    *   虽然 App 核心代码闭源（保护商业逻辑），但在 GitHub 开源“CosyVoice 连接器”和“Prompt 模板”。
+    *   在 Product Hunt, Hacker News, V2EX 发布。
+2.  **内容营销：**
+    *   在 Bilibili/YouTube 发布视频：“如何用 AI 免费练出口译员级别的听力”。
+    *   展示“噪音干扰训练”的酷炫效果，制造传播点。
+3.  **社区飞轮：**
+    *   鼓励用户分享高质量的“意群划分 JSON”。
+    *   举办“最难听力挑战赛”，分享带有强干扰噪音的配置文件。
+
+---
+
+## 第五部分：立即执行清单 (Immediate Action Items)
+
+**Day 1 (今天):**
+1.  [ ] **技术验证：** 写一个纯 HTML demo，测试 `edge-tts` 的 WebSocket 接口是否能在浏览器端直接调用并返回时间戳。
+2.  [ ] **UI 设计：** 用 v0.dev 或草图画出“左右分栏”的桌面布局。
+3.  [ ] **项目初始化：** `npm create tauri-app`。
+
+**Day 2:**
+1.  [ ] **播放器逻辑：** 实现 Howler.js 的双轨播放原型。
+2.  [ ] **数据清洗：** 定义好 TypeScript 的 Interface，确保 Edge-TTS 和 OpenAI 的数据能转化为统一格式。
+
+---
+
+**总结：**
+这个方案利用 **Tauri** 获得了极佳的桌面体验，利用 **Supabase** 解决了后端运维负担，利用 **BYOK** 解决了 AI 成本问题。
+您现在拥有了一个兼具**技术壁垒**（意群播放器体验）和**内容护城河**（社区 JSON 库）的完美蓝图。
+
+**Ready? Let's build ChunkMaster!** 🚀

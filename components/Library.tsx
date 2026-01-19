@@ -1,348 +1,647 @@
-import React, { useState } from 'react';
-import { useStore } from '../store/useStore';
-import { Play, Clock, Tag, Download, Sparkles, Loader2, Plus, ChevronRight, Wand2, Dices } from 'lucide-react';
-import { Button } from './ui/Button';
-import { StudyMaterial, Chunk, ProviderType } from '../types';
-import { translations } from '../services/translations';
-import { GoogleGenAI } from "@google/genai";
-
-// --- Helper: Post-processing to simulate timestamps based on text length ---
-const processGeneratedContent = (
-  raw: any, 
-  provider: ProviderType
-): StudyMaterial => {
-  // Handle both old format (string[]) and new format ({text, translation}[])
-  const rawChunks = raw.chunks || raw.chunk_texts || [];
-  
-  // Simulate timing: avg speaking rate ~150 words/min = ~2.5 words/sec
-  // We'll use character count as a proxy for simpler estimation (approx 15 chars per sec for speaking speed)
-  const CHARS_PER_SEC = 12; 
-  
-  let currentTime = 0;
-  const processedChunks: Chunk[] = rawChunks.map((item: any, idx: number) => {
-    // Determine text and translation based on format
-    const text = typeof item === 'string' ? item : item.text;
-    const translation = typeof item === 'object' ? item.translation : undefined;
-
-    const duration = Math.max(1.5, text.length / CHARS_PER_SEC); // Min 1.5s per chunk
-    const start = currentTime;
-    const end = start + duration;
-    currentTime = end;
-    
-    return {
-      id: `gen_${Date.now()}_${idx}`,
-      text: text,
-      translation: translation,
-      start_time: Number(start.toFixed(2)),
-      end_time: Number(end.toFixed(2))
-    };
-  });
-
-  return {
-    id: `gen_${Date.now()}`,
-    title: raw.title || 'Untitled Session',
-    description: raw.description || 'AI Generated content.',
-    original_text: raw.original_text || processedChunks.map(c => c.text).join(' '),
-    chunks: processedChunks,
-    duration: Number(currentTime.toFixed(2)),
-    config: {
-      recommended_speed: 1.0,
-      recommended_noise_level: 0.2,
-      provider_type: provider,
-      tags: raw.tags || ['AI Generated'],
-      difficulty: raw.difficulty || 'Medium'
-    }
-  };
-};
+import React, { useState, useEffect } from 'react'
+import { useStore } from '../store/useStore'
+import {
+  Play,
+  Clock,
+  Tag,
+  Download,
+  Sparkles,
+  Loader2,
+  Plus,
+  ChevronRight,
+  Wand2,
+  Dices,
+  Heart,
+  Star,
+  Users,
+  Search,
+  Filter,
+  Mic,
+  User,
+  Trash2,
+} from 'lucide-react'
+import { Button } from './ui/Button'
+import {
+  StudyMaterial,
+  ProviderType,
+  ContentType,
+  AIServiceConfig,
+  SpeakerGender,
+  Chunk,
+} from '../types'
+import { translations } from '../services/translations'
+import { authService } from '../services/authService'
+import { dataService } from '../services/dataService'
+import { AIServiceFactory } from '../services/aiService'
+import { CosyVoiceService } from '../services/cosyvoiceService'
+import { WhisperXService } from '../services/whisperxService'
+import { arrayBufferToBase64, extractAudioSegment } from '../services/audioUtils'
 
 export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
-  const { materials, setMaterial, addMaterial, settings } = useStore();
-  const t = translations[settings.language];
-  
+  const { materials, setMaterial, addMaterial, deleteMaterial, settings } = useStore()
+  const t = translations[settings.language]
+
   // Generator State
-  const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
-  const [topic, setTopic] = useState('');
-  const [difficulty, setDifficulty] = useState('Medium');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [isGeneratorOpen, setIsGeneratorOpen] = useState(false)
+  const [topic, setTopic] = useState('')
+  const [difficulty, setDifficulty] = useState<'Easy' | 'Medium' | 'Hard' | 'Insane'>('Medium')
+  const [contentType, setContentType] = useState<ContentType>('monologue')
+  const [speakerGender, setSpeakerGender] = useState<SpeakerGender>('male-female')
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const handlePlay = (id: string) => {
-    setMaterial(id);
-    onViewPlayer();
-  };
+    setMaterial(id)
+    onViewPlayer()
+  }
+
+  const handleDelete = (id: string) => {
+    if (deleteConfirmId === id) {
+      deleteMaterial(id)
+      setDeleteConfirmId(null)
+    } else {
+      setDeleteConfirmId(id)
+    }
+  }
+
+  const handleDeleteCancel = () => {
+    setDeleteConfirmId(null)
+  }
 
   const difficultyColor = (diff: string) => {
     switch (diff) {
-      case 'Easy': return 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
-      case 'Medium': return 'text-amber-500 bg-amber-500/10 border-amber-500/20';
-      case 'Hard': return 'text-orange-500 bg-orange-500/10 border-orange-500/20';
-      case 'Insane': return 'text-rose-500 bg-rose-500/10 border-rose-500/20';
-      default: return 'text-zinc-400';
+      case 'Easy':
+        return 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20'
+      case 'Medium':
+        return 'text-amber-500 bg-amber-500/10 border-amber-500/20'
+      case 'Hard':
+        return 'text-orange-500 bg-orange-500/10 border-orange-500/20'
+      case 'Insane':
+        return 'text-rose-500 bg-rose-500/10 border-rose-500/20'
+      default:
+        return 'text-zinc-400'
     }
-  };
+  }
 
   const generateContent = async (mode: 'topic' | 'random') => {
-    setError(null);
-    setIsGenerating(true);
+    setError(null)
+    setIsGenerating(true)
 
     try {
-      // 1. Determine Provider and API Key
-      const envApiKey = process.env.API_KEY;
-      
-      let provider: ProviderType | null = null;
-      let apiKey = '';
-      
+      const envApiKey = process.env.API_KEY
+
+      let provider: ProviderType | null = null
+      let apiKey = ''
+
       if (settings.openaiKey) {
-        provider = 'openai';
-        apiKey = settings.openaiKey;
+        provider = 'openai'
+        apiKey = settings.openaiKey
       } else if (settings.deepseekKey) {
-        provider = 'deepseek';
-        apiKey = settings.deepseekKey;
+        provider = 'deepseek'
+        apiKey = settings.deepseekKey
       } else if (settings.geminiKey || envApiKey) {
-        provider = 'gemini';
-        apiKey = settings.geminiKey || envApiKey || '';
+        provider = 'gemini'
+        apiKey = settings.geminiKey || envApiKey || ''
       }
 
       if (!provider || !apiKey) {
-        throw new Error(t.err_no_key);
+        throw new Error(t.err_no_key)
       }
 
-      // 2. Construct Prompt based on mode
-      let promptTaskDesc = "";
-      
-      if (mode === 'random') {
-        promptTaskDesc = `
-        Task: 
-        1. Randomly select an interesting, specific topic. It could be anything from "The philosophy of minimalism" to "How a coffee machine works", "A cyberpunk detective story snippet", or "A casual chat about the weather on Mars". Be creative!
-        2. Randomly assign a Difficulty level (Easy, Medium, Hard, or Insane) appropriate for the topic.
-        3. Create a speech or dialogue in English based on this topic.
-        `;
-      } else {
-        promptTaskDesc = `
-        Task: Create a speech/dialogue in English about "${topic}" (Difficulty: ${difficulty}).
-        `;
-      }
-
-      const systemPrompt = `You are an expert linguist and English teacher specializing in "Sense Group Phrasing" (Chunking) and "Sight Translation".
-
-      ${promptTaskDesc}
-      
-      ### 1. Chunking Rules (Segmentation)
-      Divide the text into meaningful "Sense Groups" or "Chunks" based on the following principles:
-      - **Syntactic Boundaries:** Split before prepositions (in, on, at, for...), conjunctions (and, but, because...), relative pronouns (that, which, who...), and infinitives (to do).
-      - **Breath Groups:** Mimic the natural rhythm of a native speaker's speech.
-      - **Length Balance:** Avoid chunks that are too long (>10 words) or too short (1 word), unless necessary for emphasis.
-      - **Logical Integrity:** Keep fixed phrases (idioms) and subject-verb structures intact if they are short.
-
-      ### 2. Translation Rules (Direct Translation)
-      Provide a Chinese translation for **each specific chunk**, NOT the whole sentence.
-      - **Pedagogical Translation:** The translation must follow the English word order (Linear Translation/Direct Translation).
-      - **Match the Chunk:** If the chunk is a prepositional phrase (e.g., "in the room"), translate it as "在房间里", not as part of a rearranged sentence.
-
-      ### 3. Output Format
-      Return strictly VALID JSON. No markdown formatting.
-      Structure:
-      {
-        "title": "String (English title)",
-        "description": "String (English description with brief Chinese summary)",
-        "original_text": "The full generated English text",
-        "difficulty": "Easy" | "Medium" | "Hard" | "Insane",
-        "tags": ["Tag1", "Tag2"],
-        "chunks": [
-          { "text": "English text snippet", "translation": "Corresponding Chinese meaning" }
-        ]
-      }
-
-      ### Few-Shot Examples (Follow this style STRICTLY for the chunks):
-      
-      **Example 1:**
-      Input: "And we're ready to start on a new era in international cooperation in space."
-      Chunks Output:
-      [
-        {"text": "And we're ready", "translation": "我们已经准备好"},
-        {"text": "to start on a new era", "translation": "去开启一个新纪元"},
-        {"text": "in international cooperation", "translation": "在国际合作方面"},
-        {"text": "in space", "translation": "在太空领域"}
+      // Random topics for variety
+      const randomTopics = [
+        'A surprising discovery in daily life',
+        'An unexpected friendship',
+        'Learning a difficult lesson',
+        'A moment of personal growth',
+        'Finding beauty in small things',
+        'Overcoming a common challenge',
+        'A memorable travel experience',
+        'The joy of helping others',
+        'A fascinating hobby or passion',
+        'Technology changing everyday life',
+        'Childhood memories and nostalgia',
+        'Future hopes and dreams',
+        'Cultural differences and similarities',
+        'Environmental awareness',
+        'The power of kindness',
+        'Creative problem solving',
+        'A funny misunderstanding',
+        'The importance of family',
+        'Pursuing a lifelong goal',
+        'Simple pleasures in life',
       ]
 
-      **Example 2:**
-      Input: "Making it significantly easier for developers to build applications."
-      Chunks Output:
-      [
-        {"text": "Making it significantly easier", "translation": "使其变得极其容易"},
-        {"text": "for developers", "translation": "对开发者来说"},
-        {"text": "to build applications", "translation": "去构建应用程序"}
-      ]
-      `;
-      
-      let jsonContent;
+      const effectiveTopic =
+        mode === 'random' ? randomTopics[Math.floor(Math.random() * randomTopics.length)] : topic
 
-      if (provider === 'gemini') {
-        const ai = new GoogleGenAI({ apiKey: apiKey });
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: systemPrompt,
-          config: {
-            responseMimeType: 'application/json'
-          }
-        });
-        
-        if (!response.text) {
-          throw new Error("No content generated");
-        }
-        jsonContent = JSON.parse(response.text);
+      const config: AIServiceConfig = { apiKey }
+      const service = AIServiceFactory.createService(provider, config)
 
-      } else {
-        let url = '';
-        if (provider === 'openai') {
-          url = 'https://api.openai.com/v1/chat/completions';
-        } else if (provider === 'deepseek') {
-          url = 'https://api.deepseek.com/chat/completions';
-        }
+      const newMaterial = await service.generateChunks(
+        effectiveTopic,
+        difficulty,
+        contentType,
+        speakerGender
+      )
 
-        const body = JSON.stringify({
-          model: provider === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat',
-          messages: [
-            { role: "system", content: "You are a helpful assistant that outputs JSON." },
-            { role: "user", content: systemPrompt }
-          ],
-          response_format: { type: "json_object" }
-        });
-
-        const response = await fetch(url, { 
-          method: 'POST', 
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          }, 
-          body 
-        });
-
-        if (!response.ok) {
-          const err = await response.text();
-          throw new Error(`${t.err_api_fail}: ${response.status} - ${err}`);
-        }
-
-        const data = await response.json();
-        jsonContent = JSON.parse(data.choices[0].message.content);
+      if (settings.ttsMode === 'cosyvoice' && settings.cosyvoiceApiUrl) {
+        await generateTTSForMaterial(newMaterial)
       }
 
-      const newMaterial = processGeneratedContent(jsonContent, provider);
-      addMaterial(newMaterial);
-      setIsGeneratorOpen(false);
-      setTopic('');
-      
+      addMaterial(newMaterial)
+      setIsGeneratorOpen(false)
+      setTopic('')
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Generation failed');
+      console.error(err)
+      setError(err.message || 'Generation failed')
     } finally {
-      setIsGenerating(false);
+      setIsGenerating(false)
     }
-  };
+  }
+
+  const generateTTSForMaterial = async (material: StudyMaterial): Promise<void> => {
+    const startTime = Date.now()
+    console.log('[TTS] Starting TTS generation for material:', material.id)
+
+    const cosyvoice = new CosyVoiceService({
+      baseUrl: settings.cosyvoiceApiUrl || 'http://localhost:9880',
+      mode: settings.cosyvoiceMode || '预训练音色',
+      speaker: settings.cosyvoiceSpeaker || '',
+      speed: settings.cosyvoiceSpeed || 1.0,
+    })
+
+    const whisperx = settings.whisperxApiUrl
+      ? new WhisperXService(settings.whisperxApiUrl || 'http://localhost:8000')
+      : null
+
+    // CRITICAL: Use original_text for TTS to ensure audio matches the intended content
+    // Chunks are derived from original_text and should not contain additional words
+    const fullText = material.original_text || material.chunks.map(c => c.text).join(' ')
+    console.log('[TTS] Full text length:', fullText.length, 'chars')
+    console.log('[TTS] Text source:', material.original_text ? 'original_text' : 'chunks fallback')
+    console.log('[TTS] Full text preview:', fullText.substring(0, 100) + '...')
+
+    let validSpeaker = settings.cosyvoiceSpeaker
+    if (!validSpeaker) {
+      try {
+        const speakersResult = await cosyvoice.getSpeakers()
+        console.log('[TTS] Available speakers:', speakersResult.speakers)
+        if (speakersResult.speakers && speakersResult.speakers.length > 0) {
+          validSpeaker = speakersResult.speakers[0]
+        }
+      } catch (err) {
+        console.warn('[TTS] Failed to get speakers:', err)
+      }
+    }
+
+    if (!validSpeaker) {
+      throw new Error('No valid speaker available. Please configure CosyVoice speaker in Settings.')
+    }
+
+    console.log('[TTS] Using speaker:', validSpeaker)
+    cosyvoice.updateConfig({ speaker: validSpeaker })
+
+    // Detect language from material text for WhisperX alignment
+    const detectLanguage = (text: string): string => {
+      const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length
+      const totalChars = text.length
+      return chineseChars > totalChars * 0.3 ? 'zh' : 'en'
+    }
+    const detectedLang = detectLanguage(fullText)
+    console.log('[TTS] Detected language for WhisperX:', detectedLang)
+
+    console.log('[TTS] Calling CosyVoice TTS...')
+    const ttsResult = await cosyvoice.generateAudioWithTimestamps(fullText, detectedLang)
+    const fullAudio = ttsResult.audio
+    console.log('[TTS] TTS complete. Audio size:', fullAudio.byteLength, 'bytes')
+
+    // Get actual audio duration by decoding
+    const audioContext = new AudioContext()
+    const audioBuffer = await audioContext.decodeAudioData(fullAudio.slice(0))
+    const actualAudioDuration = audioBuffer.duration
+    const sampleRate = audioBuffer.sampleRate
+    console.log('[TTS] Actual audio duration:', actualAudioDuration, 'seconds')
+    console.log('[TTS] Audio sample rate:', sampleRate, 'Hz')
+
+    console.log('[TTS] CosyVoice returned words:', ttsResult.words?.length || 0)
+    if (ttsResult.words && ttsResult.words.length > 0) {
+      console.log(
+        '[TTS] CosyVoice words time range:',
+        ttsResult.words[0].start,
+        '-',
+        ttsResult.words[ttsResult.words.length - 1].end
+      )
+      console.log('[TTS] CosyVoice words preview (first 5):', ttsResult.words.slice(0, 5))
+    }
+
+    // Save full audio for debugging
+    const fullAudioBase64 = arrayBufferToBase64(fullAudio)
+    console.log('[TTS] Full audio base64 length:', fullAudioBase64.length)
+    console.log(
+      '[TTS] Full audio base64 preview (first 200 chars):',
+      fullAudioBase64.substring(0, 200)
+    )
+
+    // Optionally create a downloadable link for the full audio
+    try {
+      const blob = new Blob([fullAudio], { type: 'audio/wav' })
+      const url = URL.createObjectURL(blob)
+      console.log('[TTS] Full audio downloadable URL:', url)
+      // Store for potential download (you can add a download button if needed)
+      ;(window as any).debugFullAudioUrl = url
+    } catch (err) {
+      console.warn('[TTS] Could not create blob for download:', err)
+    }
+
+    let allWords: any[] = []
+    console.log('[TTS] WhisperX available:', !!whisperx)
+    console.log('[TTS] WhisperX alignment enabled:', settings.whisperxEnableAlignment)
+    console.log('[TTS] CosyVoice words count:', ttsResult.words?.length || 0)
+
+    if (whisperx && settings.whisperxEnableAlignment) {
+      try {
+        console.log('[TTS] Calling WhisperX for alignment...')
+        const transcribeResult = await whisperx.transcribe(fullAudio, {
+          language: settings.whisperxLanguage || 'en',
+          model: settings.whisperxModel || 'large-v2',
+          alignOutput: true,
+        })
+        allWords = whisperx.convertToWordTimestamps(transcribeResult, 0)
+        console.log('[TTS] WhisperX complete. Words count:', allWords.length)
+      } catch (err) {
+        console.warn('[TTS] WhisperX alignment failed, using CosyVoice words:', err)
+        allWords = ttsResult.words || []
+      }
+    } else {
+      allWords = ttsResult.words || []
+      console.log('[TTS] Using CosyVoice words. Count:', allWords.length)
+    }
+
+    console.log('[TTS] Final allWords count for alignment:', allWords.length)
+    if (allWords.length > 0) {
+      console.log('[TTS] First few words:', allWords.slice(0, 3))
+    }
+
+    // Use text-based sequence matching to assign words to chunks
+    // This is more reliable than time-based matching because chunk timestamps are estimated
+    let wordIndex = 0
+    let successCount = 0
+
+    // First pass: assign words to chunks by text matching
+    for (let i = 0; i < material.chunks.length; i++) {
+      const chunk = material.chunks[i]
+      try {
+        console.log(
+          `[TTS] Processing chunk ${i + 1}/${material.chunks.length}:`,
+          `text="${chunk.text}"`,
+          `time=${chunk.start_time}s - ${chunk.end_time}s (estimated)`
+        )
+
+        // Build chunk text word list for matching
+        const chunkTextWords = chunk.text.split(/\s+/).filter(w => w.length > 0)
+
+        // Assign words from allWords to this chunk by sequence
+        const chunkWords: any[] = []
+        let matchedWordCount = 0
+
+        for (const textWord of chunkTextWords) {
+          if (wordIndex >= allWords.length) break
+
+          const currentWord = allWords[wordIndex]
+          const wordText = currentWord.word.trim().replace(/[.,!?;:]/g, '')
+          const textWordClean = textWord.trim().replace(/[.,!?;:]/g, '')
+
+          // Check if words match (fuzzy matching to handle punctuation/case differences)
+          if (wordText.toLowerCase() === textWordClean.toLowerCase()) {
+            chunkWords.push({ ...currentWord })
+            matchedWordCount++
+            wordIndex++
+          } else {
+            // Word mismatch - try to find the matching word in next few positions
+            // This handles cases where WhisperX might skip or misalign some words
+            let found = false
+            for (
+              let lookAhead = 1;
+              lookAhead <= 5 && wordIndex + lookAhead < allWords.length;
+              lookAhead++
+            ) {
+              const lookAheadWord = allWords[wordIndex + lookAhead]
+              const lookAheadText = lookAheadWord.word.trim().replace(/[.,!?;:]/g, '')
+              if (lookAheadText.toLowerCase() === textWordClean.toLowerCase()) {
+                // Found it! Add the skipped words and this word
+                for (let k = 0; k <= lookAhead; k++) {
+                  chunkWords.push({ ...allWords[wordIndex + k] })
+                  matchedWordCount++
+                }
+                wordIndex += lookAhead + 1
+                found = true
+                break
+              }
+            }
+
+            if (!found) {
+              // Could not find matching word - skip this text word and continue
+              console.warn(
+                `[TTS] Chunk ${i + 1}: Could not match word "${textWord}" at position ${wordIndex}, ` +
+                  `expected "${textWordClean}" but got "${wordText}"`
+              )
+              // Still advance wordIndex to avoid infinite loop
+              wordIndex++
+            }
+          }
+        }
+
+        chunk.words = chunkWords
+        console.log(`[TTS] Chunk ${i + 1} aligned ${chunk.words.length} words`)
+        successCount++
+      } catch (err) {
+        console.error(`[TTS] Failed to process chunk ${i + 1}:`, err)
+      }
+    }
+
+    // Second pass: recalculate chunk timestamps based on actual word timestamps
+    console.log('[TTS] Recalculating chunk timestamps based on WhisperX word alignments...')
+    for (let i = 0; i < material.chunks.length; i++) {
+      const chunk = material.chunks[i]
+      if (chunk.words && chunk.words.length > 0) {
+        // Store original word timestamps before modification
+        const originalWords = chunk.words.map(w => ({ ...w }))
+
+        // Use first and last word timestamps to determine chunk boundaries
+        const firstWordStart = originalWords[0].start
+        const lastWordEnd = originalWords[originalWords.length - 1].end
+
+        // Add small padding (0.1s before) for natural pauses, but use word-level end as boundary
+        const padding = 0.1
+        chunk.start_time = Math.max(0, firstWordStart - padding)
+        chunk.end_time = lastWordEnd // 统一使用词级end作为chunk结束时间
+
+        // Adjust word timestamps relative to new chunk start
+        for (let i = 0; i < chunk.words.length; i++) {
+          chunk.words[i].start = Math.max(0, originalWords[i].start - chunk.start_time)
+          chunk.words[i].end = originalWords[i].end - chunk.start_time
+        }
+
+        console.log(
+          `[TTS] Chunk ${i + 1}: "${chunk.text}"`,
+          `time=${chunk.start_time.toFixed(2)}s - ${chunk.end_time.toFixed(2)}s`,
+          `duration=${(chunk.end_time - chunk.start_time).toFixed(2)}s`,
+          `words=${chunk.words.length}`
+        )
+      } else {
+        // Fallback: use estimated timestamps (no word alignment available)
+        console.warn(`[TTS] Chunk ${i + 1} has no word alignment, using estimated timestamps`)
+      }
+    }
+
+    // Third pass: extract audio segments using recalculated timestamps
+    console.log('[TTS] Extracting audio segments with recalculated timestamps...')
+    for (let i = 0; i < material.chunks.length; i++) {
+      const chunk = material.chunks[i]
+      try {
+        const chunkAudio = await extractAudioSegment(fullAudio, chunk.start_time, chunk.end_time)
+        chunk.audioData = arrayBufferToBase64(chunkAudio)
+
+        console.log(
+          `[TTS] Chunk ${i + 1} audioData length:`,
+          chunk.audioData?.length,
+          'words:',
+          chunk.words?.length
+        )
+      } catch (err) {
+        console.error(`[TTS] Failed to extract audio for chunk ${i + 1}:`, err)
+      }
+    }
+
+    material.ttsGenerated = true
+    const elapsed = Date.now() - startTime
+    console.log(
+      `[TTS] Complete! ${successCount}/${material.chunks.length} chunks processed in ${elapsed}ms`
+    )
+
+    // Provide a way to download the full audio for debugging
+    console.log('[TTS] === DEBUG INFO ===')
+    console.log('[TTS] To download the full audio, run this in console:')
+    console.log(
+      '[TTS]',
+      `
+      const link = document.createElement('a');
+      link.href = window.debugFullAudioUrl;
+      link.download = 'full_audio_${material.id}.wav';
+      link.click();
+    `
+    )
+    console.log('[TTS] Or just open this URL in a new tab:', (window as any).debugFullAudioUrl)
+    console.log('[TTS] === END DEBUG INFO ===')
+  }
 
   return (
     <div className="p-8 space-y-8 animate-fade-in pb-24">
-      
       {/* Header */}
       <div className="flex justify-between items-end">
         <div>
-          <h2 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">{t.lib_title}</h2>
+          <h2 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">
+            {t.lib_title}
+          </h2>
           <p className="text-zinc-500 dark:text-zinc-400 mt-1">{t.lib_subtitle}</p>
         </div>
         <div className="flex gap-2">
-           <Button variant="outline" className="gap-2">
-             <Download className="w-4 h-4" /> 
-             {t.lib_import}
-           </Button>
-           <Button variant="outline" className="gap-2" onClick={() => setIsGeneratorOpen(!isGeneratorOpen)}>
-             <Sparkles className="w-4 h-4 text-accent" />
-             {t.lib_workshop_btn}
-           </Button>
+          <Button variant="outline" className="gap-2">
+            <Download className="w-4 h-4" />
+            {t.lib_import}
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => setIsGeneratorOpen(!isGeneratorOpen)}
+          >
+            <Sparkles className="w-4 h-4 text-accent" />
+            {t.lib_workshop_btn}
+          </Button>
         </div>
       </div>
 
       {/* AI Generator Panel */}
       {isGeneratorOpen && (
         <div className="bg-gradient-to-br from-indigo-50 to-white dark:from-indigo-900/20 dark:to-secondary border border-indigo-200 dark:border-indigo-500/30 rounded-xl p-6 space-y-4 animate-in slide-in-from-top-4 fade-in duration-300 shadow-xl shadow-indigo-500/5">
-           <div className="flex items-center gap-2 mb-2">
-              <Wand2 className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />
-              <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">{t.lib_gen_title}</h3>
-           </div>
-           
-           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="md:col-span-3">
-                <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">{t.lib_gen_topic}</label>
-                <input 
-                  type="text" 
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  placeholder={t.lib_gen_topic_ph}
-                  className="w-full bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-lg py-2.5 px-4 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-colors"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">{t.lib_gen_diff}</label>
-                <select 
-                  value={difficulty}
-                  onChange={(e) => setDifficulty(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-lg py-2.5 px-4 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none appearance-none transition-colors"
+          <div className="flex items-center gap-2 mb-2">
+            <Wand2 className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />
+            <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">
+              {t.lib_gen_title}
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="md:col-span-3">
+              <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
+                {t.lib_gen_topic}
+              </label>
+              <input
+                type="text"
+                value={topic}
+                onChange={e => setTopic(e.target.value)}
+                placeholder={t.lib_gen_topic_ph}
+                className="w-full bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-lg py-2.5 px-4 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-colors"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
+                {t.lib_gen_diff}
+              </label>
+              <select
+                value={difficulty}
+                onChange={e =>
+                  setDifficulty(e.target.value as 'Easy' | 'Medium' | 'Hard' | 'Insane')
+                }
+                className="w-full bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-lg py-2.5 px-4 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none appearance-none transition-colors"
+              >
+                <option value="Easy">Easy</option>
+                <option value="Medium">Medium</option>
+                <option value="Hard">Hard</option>
+                <option value="Insane">Insane</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
+                Content Type
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setContentType('monologue')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
+                    contentType === 'monologue'
+                      ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                      : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-indigo-500/50'
+                  }`}
                 >
-                  <option>Easy</option>
-                  <option>Medium</option>
-                  <option>Hard</option>
-                  <option>Insane</option>
-                </select>
+                  <Mic className="w-4 h-4" />
+                  <span className="text-sm font-medium">Single Voice</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setContentType('dialogue')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
+                    contentType === 'dialogue'
+                      ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                      : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-indigo-500/50'
+                  }`}
+                >
+                  <User className="w-4 h-4" />
+                  <span className="text-sm font-medium">Dialogue</span>
+                </button>
               </div>
-           </div>
+            </div>
 
-           {error && (
-             <div className="text-rose-500 text-sm bg-rose-50 dark:bg-rose-500/10 p-2 rounded border border-rose-200 dark:border-rose-500/20">
-               {error}
-             </div>
-           )}
+            {contentType === 'dialogue' && (
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
+                  Speaker Gender
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSpeakerGender('male-male')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
+                      speakerGender === 'male-male'
+                        ? 'bg-blue-500/10 border-blue-500 text-blue-600 dark:text-blue-400'
+                        : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-blue-500/50'
+                    }`}
+                  >
+                    <span className="text-sm font-medium">Male-Male</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSpeakerGender('male-female')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
+                      speakerGender === 'male-female'
+                        ? 'bg-violet-500/10 border-violet-500 text-violet-600 dark:text-violet-400'
+                        : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-violet-500/50'
+                    }`}
+                  >
+                    <span className="text-sm font-medium">Male-Female</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSpeakerGender('female-female')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
+                      speakerGender === 'female-female'
+                        ? 'bg-pink-500/10 border-pink-500 text-pink-600 dark:text-pink-400'
+                        : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-pink-500/50'
+                    }`}
+                  >
+                    <span className="text-sm font-medium">Female-Female</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
-           <div className="flex flex-col md:flex-row justify-end gap-3 pt-2">
-             {/* Random Button */}
-             <Button 
-                onClick={() => generateContent('random')} 
-                disabled={isGenerating} 
-                variant="secondary"
-                className="gap-2 w-full md:w-auto"
-              >
-               {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Dices className="w-4 h-4" />}
-               {isGenerating ? t.lib_gen_btn_loading : t.lib_gen_btn_random}
-             </Button>
+          {error && (
+            <div className="text-rose-500 text-sm bg-rose-50 dark:bg-rose-500/10 p-2 rounded border border-rose-200 dark:border-rose-500/20">
+              {error}
+            </div>
+          )}
 
-             {/* Specific Generate Button */}
-             <Button 
-                onClick={() => generateContent('topic')} 
-                disabled={isGenerating || !topic.trim()} 
-                className="gap-2 w-full md:w-auto min-w-[140px]"
-              >
-               {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-               {isGenerating ? t.lib_gen_btn_loading : t.lib_gen_btn_create}
-             </Button>
-           </div>
+          <div className="flex flex-col md:flex-row justify-end gap-3 pt-2">
+            {/* Random Button */}
+            <Button
+              onClick={() => generateContent('random')}
+              disabled={isGenerating}
+              variant="secondary"
+              className="gap-2 w-full md:w-auto"
+            >
+              {isGenerating ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Dices className="w-4 h-4" />
+              )}
+              {isGenerating ? t.lib_gen_btn_loading : t.lib_gen_btn_random}
+            </Button>
+
+            {/* Specific Generate Button */}
+            <Button
+              onClick={() => generateContent('topic')}
+              disabled={isGenerating || !topic.trim()}
+              className="gap-2 w-full md:w-auto min-w-[140px]"
+            >
+              {isGenerating ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
+              {isGenerating ? t.lib_gen_btn_loading : t.lib_gen_btn_create}
+            </Button>
+          </div>
         </div>
       )}
 
       {/* Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {materials.map((item) => (
-          <div 
-            key={item.id} 
+        {materials.map(item => (
+          <div
+            key={item.id}
             className="group bg-surface rounded-xl border border-border p-5 hover:border-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/5 dark:hover:bg-zinc-800/50 hover:bg-zinc-50 transition-all duration-300 flex flex-col h-full relative overflow-hidden"
           >
             {/* Hover Glow Effect */}
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
             <div className="flex justify-between items-start mb-4 relative z-10">
-              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${difficultyColor(item.config.difficulty)}`}>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${difficultyColor(item.config.difficulty)}`}
+              >
                 {item.config.difficulty}
               </span>
               <span className="text-[10px] font-mono text-zinc-500 bg-secondary border border-border px-2 py-1 rounded flex items-center gap-1.5">
-                {item.config.provider_type === 'gemini' && <Sparkles className="w-3 h-3 text-sky-400" />}
+                {item.config.provider_type === 'gemini' && (
+                  <Sparkles className="w-3 h-3 text-sky-400" />
+                )}
                 {item.config.provider_type}
               </span>
             </div>
@@ -350,7 +649,7 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
             <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 leading-snug group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors relative z-10">
               {item.title}
             </h3>
-            
+
             <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 flex-grow line-clamp-2 relative z-10">
               {item.description}
             </p>
@@ -358,7 +657,10 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
             <div className="space-y-4 relative z-10">
               <div className="flex flex-wrap gap-2">
                 {item.config.tags.slice(0, 3).map(tag => (
-                  <div key={tag} className="flex items-center text-xs text-zinc-500 dark:text-zinc-400 bg-secondary px-2 py-1 rounded">
+                  <div
+                    key={tag}
+                    className="flex items-center text-xs text-zinc-500 dark:text-zinc-400 bg-secondary px-2 py-1 rounded"
+                  >
                     <Tag className="w-3 h-3 mr-1 opacity-50" />
                     {tag}
                   </div>
@@ -366,19 +668,48 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
               </div>
 
               <div className="flex items-center justify-between border-t border-border pt-4 mt-auto">
-                <div className="flex items-center text-zinc-500 dark:text-zinc-400 text-sm font-mono">
-                  <Clock className="w-4 h-4 mr-1.5 text-zinc-400" />
-                  {item.duration}s
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center text-zinc-500 dark:text-zinc-400 text-sm font-mono">
+                    <Clock className="w-4 h-4 mr-1.5 text-zinc-400" />
+                    {item.duration}s
+                  </div>
                 </div>
-                <Button onClick={() => handlePlay(item.id)} size="sm" className="gap-1 pl-4 pr-3">
-                  {t.lib_start}
-                  <ChevronRight className="w-4 h-4 opacity-60" />
-                </Button>
+                <div className="flex items-center gap-2">
+                  {/* Delete Button */}
+                  {deleteConfirmId === item.id ? (
+                    <>
+                      <button
+                        onClick={handleDeleteCancel}
+                        className="px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
+                      >
+                        取消
+                      </button>
+                      <button
+                        onClick={() => handleDelete(item.id)}
+                        className="px-3 py-1.5 text-xs font-medium bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors"
+                      >
+                        确认删除
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => handleDelete(item.id)}
+                      className="p-1.5 text-zinc-400 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
+                      title="删除"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                  <Button onClick={() => handlePlay(item.id)} size="sm" className="gap-1 pl-4 pr-3">
+                    {t.lib_start}
+                    <ChevronRight className="w-4 h-4 opacity-60" />
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
         ))}
       </div>
     </div>
-  );
-};
+  )
+}

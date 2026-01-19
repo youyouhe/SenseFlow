@@ -1,11 +1,14 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ChunkMaster | 意群大师</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
         --bg-background: #09090b;
@@ -20,32 +23,34 @@
       .light {
         --bg-background: #f8fafc; /* Slate 50 - slightly cooler/crisper than zinc */
         --bg-surface: #ffffff;
-        --bg-secondary: #f1f5f9;  /* Slate 100 */
-        --text-main: #0f172a;     /* Slate 900 */
-        --text-muted: #64748b;    /* Slate 500 */
-        --border-color: #e2e8f0;  /* Slate 200 */
+        --bg-secondary: #f1f5f9; /* Slate 100 */
+        --text-main: #0f172a; /* Slate 900 */
+        --text-muted: #64748b; /* Slate 500 */
+        --border-color: #e2e8f0; /* Slate 200 */
       }
 
       body {
         background-color: var(--bg-background);
         color: var(--text-main);
-        transition: background-color 0.3s, color 0.3s;
+        transition:
+          background-color 0.3s,
+          color 0.3s;
       }
-      
+
       /* Custom scrollbar for that "Geek" feel */
       ::-webkit-scrollbar {
         width: 8px;
         height: 8px;
       }
       ::-webkit-scrollbar-track {
-        background: transparent; 
+        background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: var(--bg-secondary); 
+        background: var(--bg-secondary);
         border-radius: 4px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8; 
+        background: #94a3b8;
       }
     </style>
     <script>
@@ -63,25 +68,26 @@
               secondary: 'var(--bg-secondary)',
               accent: '#8b5cf6', // Violet 500
               border: 'var(--border-color)',
-            }
-          }
+            },
+          },
+        },
+      }
+    </script>
+    <script type="importmap">
+      {
+        "imports": {
+          "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+          "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+          "zustand": "https://esm.sh/zustand@^5.0.10",
+          "react/": "https://esm.sh/react@^19.2.3/",
+          "react": "https://esm.sh/react@^19.2.3",
+          "@google/genai": "https://esm.sh/@google/genai"
         }
       }
     </script>
-  <script type="importmap">
-{
-  "imports": {
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "zustand": "https://esm.sh/zustand@^5.0.10",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "@google/genai": "https://esm.sh/@google/genai"
-  }
-}
-</script>
-</head>
+  </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>

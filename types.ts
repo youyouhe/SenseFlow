@@ -39,6 +39,12 @@ export interface MaterialConfig {
   speaker_gender?: SpeakerGender
 }
 
+export interface VoiceConfig {
+  speaker: string
+  speed: number
+  generatedAt: number
+}
+
 export interface StudyMaterial {
   id: string
   title: string
@@ -49,6 +55,7 @@ export interface StudyMaterial {
   config: MaterialConfig
   createdAt: number
   ttsGenerated: boolean
+  voiceConfig?: VoiceConfig
 }
 
 export interface UserSettings {

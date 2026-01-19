@@ -19,6 +19,11 @@ import {
   Mic,
   User,
   Trash2,
+  Music,
+  RefreshCw,
+  X,
+  Check,
+  AlertCircle,
 } from 'lucide-react'
 import { Button } from './ui/Button'
 import {
@@ -28,6 +33,7 @@ import {
   AIServiceConfig,
   SpeakerGender,
   Chunk,
+  VoiceConfig,
 } from '../types'
 import { translations } from '../services/translations'
 import { authService } from '../services/authService'
@@ -36,6 +42,7 @@ import { AIServiceFactory } from '../services/aiService'
 import { CosyVoiceService } from '../services/cosyvoiceService'
 import { WhisperXService } from '../services/whisperxService'
 import { arrayBufferToBase64, extractAudioSegment } from '../services/audioUtils'
+import { storageManager } from '../services/storageManager'
 
 export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
   const { materials, setMaterial, addMaterial, deleteMaterial, settings } = useStore()
@@ -50,6 +57,17 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  // Voice Regeneration State
+  const [voiceRegenMaterial, setVoiceRegenMaterial] = useState<StudyMaterial | null>(null)
+  const [voiceRegenSpeaker, setVoiceRegenSpeaker] = useState<string>('')
+  const [availableSpeakers, setAvailableSpeakers] = useState<string[]>([])
+  const [isLoadingSpeakers, setIsLoadingSpeakers] = useState(false)
+  const [isRegenerating, setIsRegenerating] = useState(false)
+  const [regenProgress, setRegenProgress] = useState<{ current: number; total: number } | null>(
+    null
+  )
+  const [regenError, setRegenError] = useState<string | null>(null)
 
   const handlePlay = (id: string) => {
     setMaterial(id)
@@ -430,6 +448,14 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
     }
 
     material.ttsGenerated = true
+
+    // Save voice configuration for future regeneration
+    material.voiceConfig = {
+      speaker: validSpeaker,
+      speed: settings.cosyvoiceSpeed || 1.0,
+      generatedAt: Date.now(),
+    }
+
     const elapsed = Date.now() - startTime
     console.log(
       `[TTS] Complete! ${successCount}/${material.chunks.length} chunks processed in ${elapsed}ms`
@@ -451,279 +477,619 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
     console.log('[TTS] === END DEBUG INFO ===')
   }
 
-  return (
-    <div className="p-8 space-y-8 animate-fade-in pb-24">
-      {/* Header */}
-      <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">
-            {t.lib_title}
-          </h2>
-          <p className="text-zinc-500 dark:text-zinc-400 mt-1">{t.lib_subtitle}</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" className="gap-2">
-            <Download className="w-4 h-4" />
-            {t.lib_import}
-          </Button>
-          <Button
-            variant="outline"
-            className="gap-2"
-            onClick={() => setIsGeneratorOpen(!isGeneratorOpen)}
-          >
-            <Sparkles className="w-4 h-4 text-accent" />
-            {t.lib_workshop_btn}
-          </Button>
+  // Voice Regeneration Functions
+  const openVoiceRegenModal = async (material: StudyMaterial) => {
+    setVoiceRegenMaterial(material)
+    setVoiceRegenSpeaker('')
+    setRegenError(null)
+    setIsLoadingSpeakers(true)
+
+    try {
+      const cosyvoice = new CosyVoiceService({
+        baseUrl: settings.cosyvoiceApiUrl || 'http://localhost:9880',
+        mode: settings.cosyvoiceMode || '预训练音色',
+        speaker: settings.cosyvoiceSpeaker || '',
+        speed: 1.0,
+      })
+
+      const speakersResult = await cosyvoice.getSpeakers()
+      setAvailableSpeakers(speakersResult.speakers || [])
+    } catch (err) {
+      console.error('Failed to fetch speakers:', err)
+      setRegenError('无法获取音色列表，请检查 CosyVoice 服务')
+      setAvailableSpeakers(['中文女', '中文男', '英文女', '英文男'])
+    } finally {
+      setIsLoadingSpeakers(false)
+    }
+  }
+
+  const closeVoiceRegenModal = () => {
+    setVoiceRegenMaterial(null)
+    setVoiceRegenSpeaker('')
+    setRegenError(null)
+    setRegenProgress(null)
+  }
+
+  const regenerateVoice = async () => {
+    if (!voiceRegenMaterial || !voiceRegenSpeaker) return
+
+    setIsRegenerating(true)
+    setRegenProgress({ current: 0, total: voiceRegenMaterial.chunks.length })
+    setRegenError(null)
+
+    try {
+      const material = voiceRegenMaterial
+      const totalChunks = material.chunks.length
+
+      // Create CosyVoice service with new speaker
+      const cosyvoice = new CosyVoiceService({
+        baseUrl: settings.cosyvoiceApiUrl || 'http://localhost:9880',
+        mode: settings.cosyvoiceMode || '预训练音色',
+        speaker: voiceRegenSpeaker,
+        speed: 1.0,
+      })
+
+      // Detect language
+      const fullText = material.original_text || material.chunks.map(c => c.text).join(' ')
+      const detectLanguage = (text: string): string => {
+        const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length
+        const totalChars = text.length
+        return chineseChars > totalChars * 0.3 ? 'zh' : 'en'
+      }
+      const detectedLang = detectLanguage(fullText)
+
+      // Generate full audio with new voice
+      console.log('[VoiceRegen] Generating audio with new voice:', voiceRegenSpeaker)
+      const ttsResult = await cosyvoice.generateAudioWithTimestamps(fullText, detectedLang)
+      const fullAudio = ttsResult.audio
+
+      // Get actual audio duration
+      const audioContext = new AudioContext()
+      const audioBuffer = await audioContext.decodeAudioData(fullAudio.slice(0))
+      material.duration = Number(audioBuffer.duration.toFixed(2))
+
+      // Clear old audio data
+      for (const chunk of material.chunks) {
+        chunk.audioData = undefined
+        chunk.words = undefined
+      }
+
+      // Use WhisperX if available for alignment
+      const whisperx = settings.whisperxApiUrl
+        ? new WhisperXService(settings.whisperxApiUrl || 'http://localhost:8000')
+        : null
+
+      let allWords: any[] = []
+
+      if (whisperx && settings.whisperxEnableAlignment) {
+        try {
+          const transcribeResult = await whisperx.transcribe(fullAudio, {
+            language: settings.whisperxLanguage || 'en',
+            model: settings.whisperxModel || 'large-v2',
+            alignOutput: true,
+          })
+          allWords = whisperx.convertToWordTimestamps(transcribeResult, 0)
+        } catch (err) {
+          console.warn('[VoiceRegen] WhisperX alignment failed, using CosyVoice words')
+          allWords = ttsResult.words || []
+        }
+      } else {
+        allWords = ttsResult.words || []
+      }
+
+      // Assign words to chunks by text matching
+      let wordIndex = 0
+      for (let i = 0; i < material.chunks.length; i++) {
+        const chunk = material.chunks[i]
+        const chunkTextWords = chunk.text.split(/\s+/).filter(w => w.length > 0)
+        const chunkWords: any[] = []
+
+        for (const textWord of chunkTextWords) {
+          if (wordIndex >= allWords.length) break
+
+          const currentWord = allWords[wordIndex]
+          const wordText = currentWord.word.trim().replace(/[.,!?;:\"'()]/g, '')
+          const textWordClean = textWord.trim().replace(/[.,!?;:\"'()]/g, '')
+
+          if (wordText.toLowerCase() === textWordClean.toLowerCase()) {
+            chunkWords.push({ ...currentWord })
+            wordIndex++
+          } else {
+            chunkWords.push({ ...currentWord, word: textWord })
+            wordIndex++
+          }
+        }
+
+        chunk.words = chunkWords
+      }
+
+      // Recalculate chunk timestamps
+      let lastEndTime = 0
+      for (let i = 0; i < material.chunks.length; i++) {
+        const chunk = material.chunks[i]
+        if (chunk.words && chunk.words.length > 0) {
+          const originalWords = chunk.words.map(w => ({ ...w }))
+          const firstWordStart = originalWords[0].start
+          const lastWordEnd = originalWords[originalWords.length - 1].end
+
+          const padding = 0.1
+          let startTime = Math.max(0, firstWordStart - padding)
+          if (startTime < lastEndTime) startTime = lastEndTime
+
+          chunk.start_time = startTime
+          chunk.end_time = lastWordEnd
+          lastEndTime = chunk.end_time
+
+          for (let j = 0; j < chunk.words.length; j++) {
+            chunk.words[j].start = Math.max(0, originalWords[j].start - chunk.start_time)
+            chunk.words[j].end = originalWords[j].end - chunk.start_time
+          }
+        }
+      }
+
+      // Extract audio segments and update progress
+      for (let i = 0; i < material.chunks.length; i++) {
+        const chunk = material.chunks[i]
+        try {
+          const chunkAudio = await extractAudioSegment(fullAudio, chunk.start_time, chunk.end_time)
+          chunk.audioData = arrayBufferToBase64(chunkAudio)
+        } catch (err) {
+          console.error(`[VoiceRegen] Failed to extract audio for chunk ${i + 1}:`, err)
+        }
+
+        setRegenProgress({ current: i + 1, total: totalChunks })
+      }
+
+      // Save voice configuration
+      material.voiceConfig = {
+        speaker: voiceRegenSpeaker,
+        speed: 1.0,
+        generatedAt: Date.now(),
+      }
+      material.ttsGenerated = true
+
+      // Save to storage and update store
+      await storageManager.saveMaterial(material)
+
+      // Update in materials list
+      useStore.setState(state => ({
+        materials: state.materials.map(m => (m.id === material.id ? material : m)),
+      }))
+
+      closeVoiceRegenModal()
+    } catch (err: any) {
+      console.error('[VoiceRegen] Failed:', err)
+      setRegenError(err.message || '音频生成失败，请重试')
+    } finally {
+      setIsRegenerating(false)
+    }
+  }
+
+  // Voice Regeneration Modal
+  const renderVoiceRegenModal = () => {
+    if (!voiceRegenMaterial) return null
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+        <div className="bg-surface rounded-xl border border-border p-6 w-full max-w-md mx-4 shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+                <Music className="w-5 h-5 text-indigo-500" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">
+                  重新生成音频
+                </h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 truncate max-w-[200px]">
+                  {voiceRegenMaterial.title}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={closeVoiceRegenModal}
+              className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Current Voice Info */}
+          {voiceRegenMaterial.voiceConfig && (
+            <div className="mb-4 p-3 bg-secondary rounded-lg border border-border">
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">当前音色</div>
+              <div className="text-sm font-medium text-zinc-900 dark:text-white flex items-center gap-2">
+                <Mic className="w-4 h-4 text-zinc-400" />
+                {voiceRegenMaterial.voiceConfig.speaker}
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {regenError && (
+            <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-500/10 rounded-lg border border-rose-200 dark:border-rose-500/20">
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-sm">{regenError}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Speaker Selection */}
+          {!isRegenerating && !regenProgress && (
+            <>
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
+                  选择新音色
+                </label>
+                {isLoadingSpeakers ? (
+                  <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 py-4">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    正在获取音色列表...
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                    {availableSpeakers.map(speaker => (
+                      <button
+                        key={speaker}
+                        onClick={() => setVoiceRegenSpeaker(speaker)}
+                        className={`p-3 rounded-lg border text-sm font-medium transition-all ${
+                          voiceRegenSpeaker === speaker
+                            ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                            : 'bg-white dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:border-indigo-500/50'
+                        }`}
+                      >
+                        {speaker}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <Button variant="secondary" onClick={closeVoiceRegenModal} className="flex-1">
+                  取消
+                </Button>
+                <Button
+                  onClick={regenerateVoice}
+                  disabled={!voiceRegenSpeaker || isLoadingSpeakers}
+                  className="flex-1 gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  开始生成
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* Progress */}
+          {isRegenerating && regenProgress && (
+            <div className="py-8">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm text-zinc-600 dark:text-zinc-400">正在生成音频...</span>
+                <span className="text-sm font-mono text-indigo-500">
+                  {regenProgress.current}/{regenProgress.total}
+                </span>
+              </div>
+              <div className="h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                  style={{
+                    width: `${(regenProgress.current / regenProgress.total) * 100}%`,
+                  }}
+                />
+              </div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-3 text-center">
+                正在处理第 {regenProgress.current} 个片段，共 {regenProgress.total} 个
+              </p>
+            </div>
+          )}
         </div>
       </div>
+    )
+  }
 
-      {/* AI Generator Panel */}
-      {isGeneratorOpen && (
-        <div className="bg-gradient-to-br from-indigo-50 to-white dark:from-indigo-900/20 dark:to-secondary border border-indigo-200 dark:border-indigo-500/30 rounded-xl p-6 space-y-4 animate-in slide-in-from-top-4 fade-in duration-300 shadow-xl shadow-indigo-500/5">
-          <div className="flex items-center gap-2 mb-2">
-            <Wand2 className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />
-            <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">
-              {t.lib_gen_title}
-            </h3>
+  return (
+    <>
+      {/* Voice Regeneration Modal */}
+      {renderVoiceRegenModal()}
+
+      <div className="p-8 space-y-8 animate-fade-in pb-24">
+        {/* Header */}
+        <div className="flex justify-between items-end">
+          <div>
+            <h2 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">
+              {t.lib_title}
+            </h2>
+            <p className="text-zinc-500 dark:text-zinc-400 mt-1">{t.lib_subtitle}</p>
           </div>
+          <div className="flex gap-2">
+            <Button variant="outline" className="gap-2">
+              <Download className="w-4 h-4" />
+              {t.lib_import}
+            </Button>
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => setIsGeneratorOpen(!isGeneratorOpen)}
+            >
+              <Sparkles className="w-4 h-4 text-accent" />
+              {t.lib_workshop_btn}
+            </Button>
+          </div>
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="md:col-span-3">
-              <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
-                {t.lib_gen_topic}
-              </label>
-              <input
-                type="text"
-                value={topic}
-                onChange={e => setTopic(e.target.value)}
-                placeholder={t.lib_gen_topic_ph}
-                className="w-full bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-lg py-2.5 px-4 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-colors"
-              />
+        {/* AI Generator Panel */}
+        {isGeneratorOpen && (
+          <div className="bg-gradient-to-br from-indigo-50 to-white dark:from-indigo-900/20 dark:to-secondary border border-indigo-200 dark:border-indigo-500/30 rounded-xl p-6 space-y-4 animate-in slide-in-from-top-4 fade-in duration-300 shadow-xl shadow-indigo-500/5">
+            <div className="flex items-center gap-2 mb-2">
+              <Wand2 className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />
+              <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">
+                {t.lib_gen_title}
+              </h3>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
-                {t.lib_gen_diff}
-              </label>
-              <select
-                value={difficulty}
-                onChange={e =>
-                  setDifficulty(e.target.value as 'Easy' | 'Medium' | 'Hard' | 'Insane')
-                }
-                className="w-full bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-lg py-2.5 px-4 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none appearance-none transition-colors"
-              >
-                <option value="Easy">Easy</option>
-                <option value="Medium">Medium</option>
-                <option value="Hard">Hard</option>
-                <option value="Insane">Insane</option>
-              </select>
-            </div>
-          </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="md:col-span-3">
+                <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
+                  {t.lib_gen_topic}
+                </label>
+                <input
+                  type="text"
+                  value={topic}
+                  onChange={e => setTopic(e.target.value)}
+                  placeholder={t.lib_gen_topic_ph}
+                  className="w-full bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-lg py-2.5 px-4 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-colors"
+                />
+              </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="md:col-span-2">
-              <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
-                Content Type
-              </label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setContentType('monologue')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
-                    contentType === 'monologue'
-                      ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                      : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-indigo-500/50'
-                  }`}
+              <div>
+                <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
+                  {t.lib_gen_diff}
+                </label>
+                <select
+                  value={difficulty}
+                  onChange={e =>
+                    setDifficulty(e.target.value as 'Easy' | 'Medium' | 'Hard' | 'Insane')
+                  }
+                  className="w-full bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-lg py-2.5 px-4 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none appearance-none transition-colors"
                 >
-                  <Mic className="w-4 h-4" />
-                  <span className="text-sm font-medium">Single Voice</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setContentType('dialogue')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
-                    contentType === 'dialogue'
-                      ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                      : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-indigo-500/50'
-                  }`}
-                >
-                  <User className="w-4 h-4" />
-                  <span className="text-sm font-medium">Dialogue</span>
-                </button>
+                  <option value="Easy">Easy</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Hard">Hard</option>
+                  <option value="Insane">Insane</option>
+                </select>
               </div>
             </div>
 
-            {contentType === 'dialogue' && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="md:col-span-2">
                 <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
-                  Speaker Gender
+                  Content Type
                 </label>
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => setSpeakerGender('male-male')}
+                    onClick={() => setContentType('monologue')}
                     className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
-                      speakerGender === 'male-male'
-                        ? 'bg-blue-500/10 border-blue-500 text-blue-600 dark:text-blue-400'
-                        : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-blue-500/50'
+                      contentType === 'monologue'
+                        ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                        : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-indigo-500/50'
                     }`}
                   >
-                    <span className="text-sm font-medium">Male-Male</span>
+                    <Mic className="w-4 h-4" />
+                    <span className="text-sm font-medium">Single Voice</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSpeakerGender('male-female')}
+                    onClick={() => setContentType('dialogue')}
                     className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
-                      speakerGender === 'male-female'
-                        ? 'bg-violet-500/10 border-violet-500 text-violet-600 dark:text-violet-400'
-                        : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-violet-500/50'
+                      contentType === 'dialogue'
+                        ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                        : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-indigo-500/50'
                     }`}
                   >
-                    <span className="text-sm font-medium">Male-Female</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSpeakerGender('female-female')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
-                      speakerGender === 'female-female'
-                        ? 'bg-pink-500/10 border-pink-500 text-pink-600 dark:text-pink-400'
-                        : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-pink-500/50'
-                    }`}
-                  >
-                    <span className="text-sm font-medium">Female-Female</span>
+                    <User className="w-4 h-4" />
+                    <span className="text-sm font-medium">Dialogue</span>
                   </button>
                 </div>
+              </div>
+
+              {contentType === 'dialogue' && (
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">
+                    Speaker Gender
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSpeakerGender('male-male')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
+                        speakerGender === 'male-male'
+                          ? 'bg-blue-500/10 border-blue-500 text-blue-600 dark:text-blue-400'
+                          : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-blue-500/50'
+                      }`}
+                    >
+                      <span className="text-sm font-medium">Male-Male</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSpeakerGender('male-female')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
+                        speakerGender === 'male-female'
+                          ? 'bg-violet-500/10 border-violet-500 text-violet-600 dark:text-violet-400'
+                          : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-violet-500/50'
+                      }`}
+                    >
+                      <span className="text-sm font-medium">Male-Female</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSpeakerGender('female-female')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border transition-colors ${
+                        speakerGender === 'female-female'
+                          ? 'bg-pink-500/10 border-pink-500 text-pink-600 dark:text-pink-400'
+                          : 'bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-pink-500/50'
+                      }`}
+                    >
+                      <span className="text-sm font-medium">Female-Female</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {error && (
+              <div className="text-rose-500 text-sm bg-rose-50 dark:bg-rose-500/10 p-2 rounded border border-rose-200 dark:border-rose-500/20">
+                {error}
               </div>
             )}
-          </div>
 
-          {error && (
-            <div className="text-rose-500 text-sm bg-rose-50 dark:bg-rose-500/10 p-2 rounded border border-rose-200 dark:border-rose-500/20">
-              {error}
-            </div>
-          )}
-
-          <div className="flex flex-col md:flex-row justify-end gap-3 pt-2">
-            {/* Random Button */}
-            <Button
-              onClick={() => generateContent('random')}
-              disabled={isGenerating}
-              variant="secondary"
-              className="gap-2 w-full md:w-auto"
-            >
-              {isGenerating ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Dices className="w-4 h-4" />
-              )}
-              {isGenerating ? t.lib_gen_btn_loading : t.lib_gen_btn_random}
-            </Button>
-
-            {/* Specific Generate Button */}
-            <Button
-              onClick={() => generateContent('topic')}
-              disabled={isGenerating || !topic.trim()}
-              className="gap-2 w-full md:w-auto min-w-[140px]"
-            >
-              {isGenerating ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Plus className="w-4 h-4" />
-              )}
-              {isGenerating ? t.lib_gen_btn_loading : t.lib_gen_btn_create}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {materials.map(item => (
-          <div
-            key={item.id}
-            className="group bg-surface rounded-xl border border-border p-5 hover:border-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/5 dark:hover:bg-zinc-800/50 hover:bg-zinc-50 transition-all duration-300 flex flex-col h-full relative overflow-hidden"
-          >
-            {/* Hover Glow Effect */}
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-
-            <div className="flex justify-between items-start mb-4 relative z-10">
-              <span
-                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${difficultyColor(item.config.difficulty)}`}
+            <div className="flex flex-col md:flex-row justify-end gap-3 pt-2">
+              {/* Random Button */}
+              <Button
+                onClick={() => generateContent('random')}
+                disabled={isGenerating}
+                variant="secondary"
+                className="gap-2 w-full md:w-auto"
               >
-                {item.config.difficulty}
-              </span>
-              <span className="text-[10px] font-mono text-zinc-500 bg-secondary border border-border px-2 py-1 rounded flex items-center gap-1.5">
-                {item.config.provider_type === 'gemini' && (
-                  <Sparkles className="w-3 h-3 text-sky-400" />
+                {isGenerating ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Dices className="w-4 h-4" />
                 )}
-                {item.config.provider_type}
-              </span>
+                {isGenerating ? t.lib_gen_btn_loading : t.lib_gen_btn_random}
+              </Button>
+
+              {/* Specific Generate Button */}
+              <Button
+                onClick={() => generateContent('topic')}
+                disabled={isGenerating || !topic.trim()}
+                className="gap-2 w-full md:w-auto min-w-[140px]"
+              >
+                {isGenerating ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+                {isGenerating ? t.lib_gen_btn_loading : t.lib_gen_btn_create}
+              </Button>
             </div>
+          </div>
+        )}
 
-            <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 leading-snug group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors relative z-10">
-              {item.title}
-            </h3>
+        {/* Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {materials.map(item => (
+            <div
+              key={item.id}
+              className="group bg-surface rounded-xl border border-border p-5 hover:border-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/5 dark:hover:bg-zinc-800/50 hover:bg-zinc-50 transition-all duration-300 flex flex-col h-full relative overflow-hidden"
+            >
+              {/* Hover Glow Effect */}
+              <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 flex-grow line-clamp-2 relative z-10">
-              {item.description}
-            </p>
-
-            <div className="space-y-4 relative z-10">
-              <div className="flex flex-wrap gap-2">
-                {item.config.tags.slice(0, 3).map(tag => (
-                  <div
-                    key={tag}
-                    className="flex items-center text-xs text-zinc-500 dark:text-zinc-400 bg-secondary px-2 py-1 rounded"
-                  >
-                    <Tag className="w-3 h-3 mr-1 opacity-50" />
-                    {tag}
-                  </div>
-                ))}
+              <div className="flex justify-between items-start mb-4 relative z-10">
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${difficultyColor(item.config.difficulty)}`}
+                >
+                  {item.config.difficulty}
+                </span>
+                <span className="text-[10px] font-mono text-zinc-500 bg-secondary border border-border px-2 py-1 rounded flex items-center gap-1.5">
+                  {item.config.provider_type === 'gemini' && (
+                    <Sparkles className="w-3 h-3 text-sky-400" />
+                  )}
+                  {item.config.provider_type}
+                </span>
               </div>
 
-              <div className="flex items-center justify-between border-t border-border pt-4 mt-auto">
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center text-zinc-500 dark:text-zinc-400 text-sm font-mono">
-                    <Clock className="w-4 h-4 mr-1.5 text-zinc-400" />
-                    {item.duration}s
-                  </div>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 leading-snug group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors relative z-10">
+                {item.title}
+              </h3>
+
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 flex-grow line-clamp-2 relative z-10">
+                {item.description}
+              </p>
+
+              <div className="space-y-4 relative z-10">
+                <div className="flex flex-wrap gap-2">
+                  {item.config.tags.slice(0, 3).map(tag => (
+                    <div
+                      key={tag}
+                      className="flex items-center text-xs text-zinc-500 dark:text-zinc-400 bg-secondary px-2 py-1 rounded"
+                    >
+                      <Tag className="w-3 h-3 mr-1 opacity-50" />
+                      {tag}
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center gap-2">
-                  {/* Delete Button */}
-                  {deleteConfirmId === item.id ? (
-                    <>
+
+                <div className="flex items-center justify-between border-t border-border pt-4 mt-auto">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center text-zinc-500 dark:text-zinc-400 text-sm font-mono">
+                      <Clock className="w-4 h-4 mr-1.5 text-zinc-400" />
+                      {item.duration}s
+                    </div>
+                    {/* Voice Config Display */}
+                    {item.voiceConfig && (
+                      <div className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400 bg-secondary px-2 py-1 rounded">
+                        <Mic className="w-3 h-3" />
+                        {item.voiceConfig.speaker}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* Regenerate Audio Button */}
+                    {item.ttsGenerated && (
                       <button
-                        onClick={handleDeleteCancel}
-                        className="px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
+                        onClick={() => openVoiceRegenModal(item)}
+                        className="p-1.5 text-zinc-400 hover:text-indigo-500 hover:bg-indigo-500/10 rounded-lg transition-colors"
+                        title="重新生成音频"
                       >
-                        取消
+                        <RefreshCw className="w-4 h-4" />
                       </button>
+                    )}
+                    {/* Delete Button */}
+                    {deleteConfirmId === item.id ? (
+                      <>
+                        <button
+                          onClick={handleDeleteCancel}
+                          className="px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
+                        >
+                          取消
+                        </button>
+                        <button
+                          onClick={() => handleDelete(item.id)}
+                          className="px-3 py-1.5 text-xs font-medium bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors"
+                        >
+                          确认删除
+                        </button>
+                      </>
+                    ) : (
                       <button
                         onClick={() => handleDelete(item.id)}
-                        className="px-3 py-1.5 text-xs font-medium bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors"
+                        className="p-1.5 text-zinc-400 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
+                        title="删除"
                       >
-                        确认删除
+                        <Trash2 className="w-4 h-4" />
                       </button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => handleDelete(item.id)}
-                      className="p-1.5 text-zinc-400 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
-                      title="删除"
+                    )}
+                    <Button
+                      onClick={() => handlePlay(item.id)}
+                      size="sm"
+                      className="gap-1 pl-4 pr-3"
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                  <Button onClick={() => handlePlay(item.id)} size="sm" className="gap-1 pl-4 pr-3">
-                    {t.lib_start}
-                    <ChevronRight className="w-4 h-4 opacity-60" />
-                  </Button>
+                      {t.lib_start}
+                      <ChevronRight className="w-4 h-4 opacity-60" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </div>
+    </>
   )
 }

@@ -80,6 +80,49 @@
         })
       }
 
+      async function getStorageEstimate() {
+        if (navigator.storage && navigator.storage.estimate) {
+          const estimate = await navigator.storage.estimate()
+          const quota = estimate.quota || 0
+          const usage = estimate.usage || 0
+          return {
+            usage: (usage / 1024 / 1024).toFixed(2) + ' MB',
+            quota: (quota / 1024 / 1024).toFixed(2) + ' MB',
+            percent: ((usage / quota) * 100).toFixed(2) + '%',
+          }
+        }
+        return null
+      }
+
+      function calculateDataSize(materials) {
+        let totalAudioSize = 0
+        let totalTextSize = 0
+        let chunkCount = 0
+        let chunksWithAudio = 0
+
+        materials.forEach(m => {
+          // Estimate JSON string size
+          const jsonStr = JSON.stringify(m)
+          totalTextSize += new Blob([jsonStr]).size
+
+          m.chunks?.forEach(c => {
+            chunkCount++
+            if (c.audioData) {
+              chunksWithAudio++
+              totalAudioSize += c.audioData.length * 0.75 // Base64 ≈ 75% of binary
+            }
+          })
+        })
+
+        return {
+          audioSize: (totalAudioSize / 1024 / 1024).toFixed(2) + ' MB',
+          textSize: (totalTextSize / 1024 / 1024).toFixed(2) + ' MB',
+          chunkCount,
+          chunksWithAudio,
+          materialsCount: materials.length,
+        }
+      }
+
       function displayResults(html) {
         document.getElementById('results').innerHTML = html
       }
@@ -89,7 +132,49 @@
           const materials = await getAllMaterials()
           const sorted = materials.sort((a, b) => b.createdAt - a.createdAt)
 
-          let html = `<h2>共 ${sorted.length} 个 Materials</h2>`
+          // Calculate storage stats
+          const stats = calculateDataSize(materials)
+          const storageEstimate = await getStorageEstimate()
+
+          let html = `
+            <div style="background: #1e1e1e; padding: 15px; margin-bottom: 20px; border-radius: 8px; border-left: 3px solid #4ec9b0;">
+              <h2 style="color: #4ec9b0; margin: 0 0 10px 0;">存储统计</h2>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">资料数量</div>
+                  <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.materialsCount}</div>
+                </div>
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">Chunk 数量</div>
+                  <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.chunkCount}</div>
+                </div>
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">含音频的 Chunk</div>
+                  <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.chunksWithAudio}</div>
+                </div>
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">音频数据</div>
+                  <div style="color: #ce9178; font-size: 18px; font-weight: bold;">${stats.audioSize}</div>
+                </div>
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">文本数据</div>
+                  <div style="color: #569cd6; font-size: 18px; font-weight: bold;">${stats.textSize}</div>
+                </div>
+                ${
+                  storageEstimate
+                    ? `
+                <div>
+                  <div style="color: #6a9955; font-size: 12px;">已用/配额</div>
+                  <div style="color: #dcdcaa; font-size: 18px; font-weight: bold;">${storageEstimate.percent}</div>
+                </div>
+                `
+                    : ''
+                }
+              </div>
+            </div>
+            <h2>共 ${sorted.length} 个 Materials</h2>
+          `
+
           sorted.forEach((m, i) => {
             const isLatest = i === 0
             html += `
@@ -129,12 +214,51 @@
             return
           }
 
+          // Calculate storage stats
+          const stats = calculateDataSize(materials)
+          const storageEstimate = await getStorageEstimate()
+
           // 检查 chunks 的 text 拼接是否等于 original_text
           const chunksText = latest.chunks?.map(c => c.text).join(' ') || ''
           const originalText = latest.original_text || ''
           const isMatching = chunksText.trim() === originalText.trim()
 
           let html = `
+          <div style="background: #1e1e1e; padding: 15px; margin-bottom: 20px; border-radius: 8px; border-left: 3px solid #4ec9b0;">
+            <h2 style="color: #4ec9b0; margin: 0 0 10px 0;">存储统计</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+              <div>
+                <div style="color: #6a9955; font-size: 12px;">资料数量</div>
+                <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.materialsCount}</div>
+              </div>
+              <div>
+                <div style="color: #6a9955; font-size: 12px;">Chunk 数量</div>
+                <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.chunkCount}</div>
+              </div>
+              <div>
+                <div style="color: #6a9955; font-size: 12px;">含音频的 Chunk</div>
+                <div style="color: #d4d4d4; font-size: 18px; font-weight: bold;">${stats.chunksWithAudio}</div>
+              </div>
+              <div>
+                <div style="color: #6a9955; font-size: 12px;">音频数据</div>
+                <div style="color: #ce9178; font-size: 18px; font-weight: bold;">${stats.audioSize}</div>
+              </div>
+              <div>
+                <div style="color: #6a9955; font-size: 12px;">文本数据</div>
+                <div style="color: #569cd6; font-size: 18px; font-weight: bold;">${stats.textSize}</div>
+              </div>
+              ${
+                storageEstimate
+                  ? `
+              <div>
+                <div style="color: #6a9955; font-size: 12px;">已用/配额</div>
+                <div style="color: #dcdcaa; font-size: 18px; font-weight: bold;">${storageEstimate.percent}</div>
+              </div>
+              `
+                  : ''
+              }
+            </div>
+          </div>
           <h2>最新 Material</h2>
           <div class="material latest">
             <strong>ID:</strong> ${latest.id}<br>

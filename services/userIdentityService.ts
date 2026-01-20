@@ -121,11 +121,12 @@ export class UserIdentityService {
     const uuid = this.getOrCreateUUID()
     email = email.toLowerCase().trim()
 
+    // Use maybeSingle() to handle case where email is not yet registered
     const { data: existing } = await supabase
       .from('sf_user_profiles')
       .select('user_uuid, email_verified')
       .eq('email', email)
-      .single()
+      .maybeSingle()
 
     if (existing && existing.user_uuid !== uuid) {
       throw new Error('该邮箱已被其他账户绑定')
@@ -145,11 +146,12 @@ export class UserIdentityService {
   }
 
   async findUserByEmail(email: string): Promise<string | null> {
+    // Use maybeSingle() to handle case where email is not found
     const { data, error } = await supabase
       .from('sf_user_profiles')
       .select('user_uuid')
       .eq('email', email.toLowerCase().trim())
-      .single()
+      .maybeSingle()
 
     if (error || !data) {
       return null
@@ -237,13 +239,14 @@ export class UserIdentityService {
   }
 
   async verifyRecoveryCode(email: string, code: string): Promise<string | null> {
+    // Use maybeSingle() to handle case where code is invalid/expired
     const { data, error } = await supabase
       .from('sf_recovery_codes')
       .select('user_uuid')
       .eq('email', email.toLowerCase())
       .eq('code', code.toUpperCase())
       .gt('expires_at', new Date().toISOString())
-      .single()
+      .maybeSingle()
 
     if (error || !data) {
       return null
@@ -338,14 +341,18 @@ export class UserIdentityService {
       }
     }
 
+    // Use maybeSingle() instead of single() to handle new users without profile
     const { data, error } = await supabase
       .from('sf_user_profiles')
       .select('public_count, private_count')
       .eq('user_uuid', uuid)
-      .single()
+      .maybeSingle()
 
-    if (error) {
-      console.error('Error getting quota:', error)
+    if (error || !data) {
+      // PGRST116 is expected for new users - no profile exists yet
+      if (error?.code !== 'PGRST116') {
+        console.warn('Error getting quota:', error)
+      }
       return {
         public: { used: 0, limit: PUBLIC_LIMIT },
         private: { used: 0, limit: PRIVATE_LIMIT },

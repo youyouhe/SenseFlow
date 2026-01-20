@@ -22,7 +22,7 @@ import { Button } from './ui/Button'
 import { translations } from '../services/translations'
 
 export const Marketplace: React.FC = () => {
-  const { settings, addMaterial } = useStore()
+  const { settings, addMaterial, materials: userMaterials } = useStore()
   const t = translations[settings.language]
 
   const [materials, setMaterials] = useState<CommunityMaterial[]>([])
@@ -137,7 +137,7 @@ export const Marketplace: React.FC = () => {
       return
     }
 
-    const existingMaterial = materials.find(m => m.text_hash === material.text_hash)
+    const existingMaterial = userMaterials.find(m => m.text_hash === material.text_hash)
     if (existingMaterial) {
       alert(t.lib_material_exists || 'Material already exists in your library!')
       return

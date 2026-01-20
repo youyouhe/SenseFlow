@@ -20,6 +20,7 @@ export const ImportExportPanel: React.FC = () => {
   const [exportStatus, setExportStatus] = useState<'idle' | 'success'>('idle')
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   const exportMaterial = (material: StudyMaterial) => {
     const dataStr = JSON.stringify(material, null, 2)
@@ -57,6 +58,10 @@ export const ImportExportPanel: React.FC = () => {
 
     setExportStatus('success')
     setTimeout(() => setExportStatus('idle'), 2000)
+  }
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click()
   }
 
   const importMaterial = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -136,13 +141,17 @@ export const ImportExportPanel: React.FC = () => {
               Upload JSON files to import learning materials
             </p>
 
-            <label className="cursor-pointer">
-              <Button className="gap-2">
-                <Download className="w-4 h-4" />
-                Choose File
-              </Button>
-              <input type="file" accept=".json" onChange={importMaterial} className="hidden" />
-            </label>
+            <Button className="gap-2" onClick={handleImportClick}>
+              <Download className="w-4 h-4" />
+              Choose File
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={importMaterial}
+              className="hidden"
+            />
           </div>
 
           {importStatus === 'success' && (

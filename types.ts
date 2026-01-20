@@ -45,6 +45,11 @@ export interface VoiceConfig {
   generatedAt: number
 }
 
+export interface AuthorInfo {
+  nickname?: string | null
+  userUuid?: string
+}
+
 export interface StudyMaterial {
   id: string
   title: string
@@ -56,6 +61,7 @@ export interface StudyMaterial {
   createdAt: number
   ttsGenerated: boolean
   voiceConfig?: VoiceConfig
+  author?: AuthorInfo
 }
 
 export interface UserSettings {

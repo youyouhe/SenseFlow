@@ -228,6 +228,7 @@ export class CommunityService {
       .select(
         `
         *,
+        sf_user_profiles(nickname),
         sf_chunks(id, chunk_index, text, translation, start_time, end_time, speaker)
       `
       )
@@ -240,7 +241,15 @@ export class CommunityService {
     }
 
     if (data.compressed_data) {
-      return compressionService.decompress(data.compressed_data)
+      const material = compressionService.decompress(data.compressed_data)
+      // Add author info from community data
+      if (data.sf_user_profiles) {
+        material.author = {
+          nickname: data.sf_user_profiles.nickname,
+          userUuid: data.user_uuid,
+        }
+      }
+      return material
     }
 
     return this.convertToStudyMaterial(data)
@@ -310,6 +319,12 @@ export class CommunityService {
       config: data.config as any,
       createdAt: new Date(data.created_at).getTime(),
       ttsGenerated: false,
+      author: data.sf_user_profiles
+        ? {
+            nickname: data.sf_user_profiles.nickname,
+            userUuid: data.user_uuid,
+          }
+        : undefined,
     }
   }
 }

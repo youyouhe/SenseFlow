@@ -81,6 +81,11 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
   const [publishError, setPublishError] = useState<string | null>(null)
   const [publishSuccess, setPublishSuccess] = useState(false)
 
+  // Import State
+  const [importStatus, setImportStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [importMessage, setImportMessage] = useState<string | null>(null)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
+
   const handlePlay = (id: string) => {
     setMaterial(id)
     onViewPlayer()
@@ -847,6 +852,54 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
     }
   }
 
+  // Import Functions
+  const handleImportClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = e => {
+      try {
+        const content = e.target?.result as string
+        const data = JSON.parse(content)
+
+        if (data.materials && Array.isArray(data.materials)) {
+          // Import multiple materials from backup
+          let importedCount = 0
+          data.materials.forEach((material: StudyMaterial) => {
+            // Check if material already exists by id
+            if (!materials.find(m => m.id === material.id)) {
+              addMaterial(material)
+              importedCount++
+            }
+          })
+          setImportMessage(importedCount > 0 ? `成功导入 ${importedCount} 个素材` : '所有素材已存在')
+        } else if (data.chunks && data.title) {
+          // Import single material
+          addMaterial(data)
+          setImportMessage(`成功导入 "${data.title}"`)
+        } else {
+          throw new Error('Invalid file format')
+        }
+
+        setImportStatus('success')
+        setTimeout(() => setImportStatus('idle'), 3000)
+      } catch (error) {
+        console.error('Import error:', error)
+        setImportMessage('导入失败，请检查文件格式')
+        setImportStatus('error')
+        setTimeout(() => setImportStatus('idle'), 3000)
+      }
+    }
+
+    reader.readAsText(file)
+    event.target.value = '' // Reset file input
+  }
+
   // Publish Modal
   const renderPublishModal = () => {
     if (!publishMaterial) return null
@@ -1010,10 +1063,17 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
             <p className="text-zinc-500 dark:text-zinc-400 mt-1">{t.lib_subtitle}</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" className="gap-2">
+            <Button variant="outline" className="gap-2" onClick={handleImportClick}>
               <Download className="w-4 h-4" />
               {t.lib_import}
             </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleImportFile}
+              className="hidden"
+            />
             <Button
               variant="outline"
               className="gap-2"
@@ -1024,6 +1084,24 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
             </Button>
           </div>
         </div>
+
+        {/* Import Status Notification */}
+        {importStatus !== 'idle' && (
+          <div
+            className={`p-4 rounded-lg border flex items-center gap-3 ${
+              importStatus === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20'
+                : 'bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-500/20'
+            }`}
+          >
+            {importStatus === 'success' ? (
+              <Check className="w-5 h-5" />
+            ) : (
+              <X className="w-5 h-5" />
+            )}
+            <span>{importMessage || (importStatus === 'success' ? '导入成功' : '导入失败')}</span>
+          </div>
+        )}
 
         {/* AI Generator Panel */}
         {isGeneratorOpen && (
@@ -1212,9 +1290,22 @@ export const Library = ({ onViewPlayer }: { onViewPlayer: () => void }) => {
                 {item.title}
               </h3>
 
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 flex-grow line-clamp-2 relative z-10">
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-2 flex-grow line-clamp-2 relative z-10">
                 {item.description}
               </p>
+
+              {/* Author display */}
+              {item.author?.nickname ? (
+                <div className="flex items-center gap-2 text-xs text-indigo-600 dark:text-indigo-400 mb-4 font-medium relative z-10">
+                  <User className="w-3 h-3" />
+                  <span>{item.author.nickname}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 mb-3 font-medium relative z-10">
+                  <User className="w-3 h-3" />
+                  <span>You</span>
+                </div>
+              )}
 
               <div className="space-y-4 relative z-10">
                 <div className="flex flex-wrap gap-2">

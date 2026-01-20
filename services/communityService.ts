@@ -65,6 +65,9 @@ export class CommunityService {
   ): Promise<void> {
     const uuid = userIdentityService.getOrCreateUUID()
 
+    // Ensure user profile exists in database (required by foreign key constraint)
+    await userIdentityService.getOrCreateProfile()
+
     const canPublish = await userIdentityService.canPublish(type)
     if (!canPublish) {
       throw new Error(

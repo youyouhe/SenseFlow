@@ -1,5 +1,7 @@
 # SenseFlow - Language Learning & Auditory Fitness
 
+![Play](/play-zh-dark.png)
+
 SenseFlow is a React/TypeScript web application designed to help users improve their listening skills through chunk-based audio training. The app supports multiple AI providers for text-to-speech and speech-to-text, with features for personal learning progress tracking and a community marketplace for sharing materials.
 
 ## Features

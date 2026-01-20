@@ -676,6 +676,45 @@ export const useStore = create<PlayerState>((set, get) => ({
   },
   setPlaybackRate: rate => set({ playbackRate: Math.max(0.5, Math.min(2.0, rate)) }),
 
+  setVoiceVolume: volume => {
+    const clampedVolume = Math.max(0, Math.min(1, volume))
+    audioService.setVoiceVolume(clampedVolume)
+    set({ voiceVolume: clampedVolume })
+  },
+
+  setNoiseVolume: volume => {
+    const clampedVolume = Math.max(0, Math.min(1, volume))
+    audioService.setNoiseVolume(clampedVolume)
+    set({ noiseVolume: clampedVolume })
+  },
+
+  toggleNoise: () => {
+    const state = get()
+    const newEnabled = !state.noiseEnabled
+    set({ noiseEnabled: newEnabled })
+
+    // If disabling noise, stop it
+    if (!newEnabled) {
+      audioService.stopNoise()
+    }
+    // If enabling noise and currently playing, start it
+    else if (state.isPlaying && state.activeMaterial) {
+      const intensity = state.settings.noiseIntensity || 0.5
+      const volume = state.noiseVolume * intensity
+      audioService.startNoise(
+        volume,
+        state.settings.noiseType as any,
+        state.settings.customNoiseData || null
+      )
+    }
+  },
+
+  setNoiseType: type => {
+    set(state => ({
+      settings: { ...state.settings, noiseType: type },
+    }))
+  },
+
   setIsLoadingAudio: loading => set({ isLoadingAudio: loading }),
   setStopAfterCurrentChunk: stop => set({ stopAfterCurrentChunk: stop }),
   setGapSound: sound => set({ gapSound: sound }),

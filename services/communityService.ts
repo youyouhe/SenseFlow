@@ -116,8 +116,8 @@ export class CommunityService {
       chunk_index: index,
       text: chunk.text,
       translation: chunk.translation || null,
-      start_time: Number(chunk.start_time),
-      end_time: Number(chunk.end_time),
+      start_time: chunk.start_time,
+      end_time: chunk.end_time,
       speaker: chunk.speaker || null,
     }))
 

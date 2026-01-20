@@ -22,6 +22,9 @@ const STORAGE_NICKNAME = 'senseflow_user_nickname'
 const PUBLIC_LIMIT = 100
 const PRIVATE_LIMIT = 50
 
+// UUID change listeners
+const uuidChangeListeners = new Set<() => void>()
+
 // Fallback UUID generator for browsers that don't support crypto.randomUUID()
 function generateUUID(): string {
   // Check if crypto.randomUUID is available
@@ -74,6 +77,18 @@ export class UserIdentityService {
 
   getUUID(): string | null {
     return localStorage.getItem(STORAGE_KEY)
+  }
+
+  // Subscribe to UUID changes (e.g., after account recovery)
+  onUUIDChange(callback: () => void): () => void {
+    uuidChangeListeners.add(callback)
+    // Return unsubscribe function
+    return () => uuidChangeListeners.delete(callback)
+  }
+
+  // Notify all listeners when UUID changes
+  private notifyUUIDChange(): void {
+    uuidChangeListeners.forEach(callback => callback())
   }
 
   getNickname(): string | null {
@@ -156,6 +171,7 @@ export class UserIdentityService {
 
     localStorage.setItem(STORAGE_KEY, targetUuid)
     this.setEmail(newEmail)
+    this.notifyUUIDChange()
   }
 
   async fetchProfileByUuid(uuid: string): Promise<UserProfile | null> {
@@ -249,6 +265,7 @@ export class UserIdentityService {
 
     localStorage.setItem(STORAGE_KEY, targetUuid)
     this.setEmail(email)
+    this.notifyUUIDChange()
   }
 
   async getOrCreateProfile(): Promise<UserProfile> {

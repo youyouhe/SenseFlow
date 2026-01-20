@@ -318,6 +318,13 @@ export const Settings = () => {
       }
     }
     loadProfile()
+
+    // Subscribe to UUID changes (e.g., after account recovery)
+    const unsubscribe = userIdentityService.onUUIDChange(() => {
+      loadProfile() // Reload profile with new UUID
+    })
+
+    return unsubscribe
   }, [])
 
   // Fetch CosyVoice speakers when CosyVoice mode is selected

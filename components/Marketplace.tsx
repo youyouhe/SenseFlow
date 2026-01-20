@@ -37,9 +37,18 @@ export const Marketplace: React.FC = () => {
   const observerRef = useRef<IntersectionObserver | null>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
 
-  // Initialize user UUID
+  // Initialize user UUID and listen for changes
   useEffect(() => {
     setUserUuid(userIdentityService.getOrCreateUUID())
+
+    // Subscribe to UUID changes (e.g., after account recovery)
+    const unsubscribe = userIdentityService.onUUIDChange(() => {
+      setUserUuid(userIdentityService.getOrCreateUUID())
+      // Reload materials with new UUID
+      loadMaterials(true)
+    })
+
+    return unsubscribe
   }, [])
 
   // Load materials when filter or difficulty changes

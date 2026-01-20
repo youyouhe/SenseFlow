@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { StudyMaterial, UserSettings, AIServiceConfig, ProviderType, UserProgress } from '../types'
+import { StudyMaterial, UserSettings, AIServiceConfig, ProviderType, UserProgress, Chunk } from '../types'
 import { audioService } from '../services/audioService'
 import { storageManager } from '../services/storageManager'
 
@@ -51,6 +51,7 @@ const DEFAULT_PROGRESS: UserProgress = {
 
 interface PlayerState {
   isPlaying: boolean
+  isChunkPlaying: boolean
   isGap: boolean
   isLoadingAudio: boolean
   currentTime: number
@@ -115,6 +116,7 @@ interface PlayerState {
   toggleLoopMode: (source: 'play-button' | 'chunk-click' | null) => void
   setLoopMode: (enabled: boolean, source?: 'play-button' | 'chunk-click' | null) => void
   tick: (delta: number) => void
+  playChunkOnce: (chunk: import('../types').Chunk) => Promise<void>
 }
 
 async function initializeStore() {
@@ -133,6 +135,7 @@ async function initializeStore() {
 
 export const useStore = create<PlayerState>((set, get) => ({
   isPlaying: false,
+  isChunkPlaying: false,
   isGap: false,
   isLoadingAudio: false,
   currentTime: 0,
@@ -336,7 +339,9 @@ export const useStore = create<PlayerState>((set, get) => ({
             // 音频播放结束，进入Gap状态
             set({ isLoadingAudio: false, currentChunkIndex: currentIndex, isGap: true })
 
-            const { stopAfterCurrentChunk } = get()
+            // 重新获取最新的状态，包括循环模式和播放状态
+            const { stopAfterCurrentChunk, isLoopMode, loopSource, isPlaying } = get()
+
             if (stopAfterCurrentChunk) {
               set({ isPlaying: false, stopAfterCurrentChunk: false })
               if (noiseEnabled) {
@@ -345,12 +350,22 @@ export const useStore = create<PlayerState>((set, get) => ({
               return
             }
 
-            if (shouldAutoPlay) {
-              const nextIndex = currentIndex + 1
+            if (shouldAutoPlay || isLoopMode) {
+              let nextIndex = currentIndex + 1
+
+              // Handle loop mode
+              if (isLoopMode) {
+                if (loopSource === 'chunk-click') {
+                  nextIndex = currentIndex // Repeat same chunk
+                } else if (loopSource === 'play-button' && nextIndex >= activeMaterial.chunks.length) {
+                  nextIndex = 0 // Loop back to start
+                }
+              }
+
               if (nextIndex < activeMaterial.chunks.length) {
                 const nextChunk = activeMaterial.chunks[nextIndex]
 
-                if (shouldSeamless) {
+                if (shouldSeamless || (isLoopMode && isPlaying)) {
                   // 在Gap结束后进入下一个chunk之前，确保时间戳正确，并准备开始播放
                   set({
                     currentChunkIndex: nextIndex,
@@ -408,13 +423,13 @@ export const useStore = create<PlayerState>((set, get) => ({
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel()
     }
-    set({ isPlaying: false })
+    set({ isPlaying: false, isChunkPlaying: false })
   },
 
   stop: () => {
     audioService.stop()
     audioService.stopNoise()
-    set({ isPlaying: false, currentTime: 0, currentChunkIndex: 0 })
+    set({ isPlaying: false, isChunkPlaying: false, currentTime: 0, currentChunkIndex: 0 })
   },
 
   seek: time => {
@@ -460,42 +475,6 @@ export const useStore = create<PlayerState>((set, get) => ({
       // 只有在音频播放期间（通过isGap控制）才累加时间
       if (currentTime < chunkEndTime) {
         set({ currentTime: currentTime + delta })
-      }
-    } else if (isPlaying && isGap && isLoopMode && activeMaterial) {
-      // 循环播放逻辑
-      let nextIndex: number
-
-      if (loopSource === 'play-button') {
-        // Play按钮循环：从当前chunk开始，循环整个材料
-        if (currentChunkIndex >= activeMaterial.chunks.length - 1) {
-          // 到达最后一个chunk，从第一个重新开始
-          nextIndex = 0
-        } else {
-          nextIndex = currentChunkIndex + 1
-        }
-      } else if (loopSource === 'chunk-click') {
-        // Chunk点击循环：只循环当前chunk
-        nextIndex = currentChunkIndex
-      } else {
-        // 默认行为：播放下一个
-        if (currentChunkIndex < activeMaterial.chunks.length - 1) {
-          nextIndex = currentChunkIndex + 1
-        } else {
-          return // 到达结尾，停止播放
-        }
-      }
-
-      if (nextIndex < activeMaterial.chunks.length) {
-        const nextChunk = activeMaterial.chunks[nextIndex]
-        set({
-          currentChunkIndex: nextIndex,
-          currentTime: nextChunk.start_time,
-          isGap: false,
-          isLoadingAudio: true,
-        })
-
-        // 触发播放下一个chunk
-        get().play(nextIndex, false)
       }
     }
   },
@@ -665,6 +644,49 @@ export const useStore = create<PlayerState>((set, get) => ({
   setIsLoadingAudio: loading => set({ isLoadingAudio: loading }),
   setStopAfterCurrentChunk: stop => set({ stopAfterCurrentChunk: stop }),
   setGapSound: sound => set({ gapSound: sound }),
+
+  playChunkOnce: async (chunk: Chunk) => {
+    const { isPlaying, isChunkPlaying, activeMaterial, settings, voiceVolume, noiseEnabled } = get()
+
+    // Lock: if already playing, ignore
+    if (isPlaying || isChunkPlaying) {
+      return
+    }
+
+    // Find chunk index
+    const chunkIndex = activeMaterial?.chunks.findIndex(c => c.id === chunk.id)
+    if (chunkIndex === -1 || chunkIndex === undefined) return
+
+    // Set lock
+    set({ isPlaying: true, isChunkPlaying: true, currentChunkIndex: chunkIndex })
+
+    // Stop any existing audio
+    audioService.cancelAllPlayback()
+    if (noiseEnabled) audioService.stopNoise()
+
+    try {
+      // Use existing audioService infrastructure
+      await audioService.playChunk(
+        chunk,
+        () => {}, // onProgress - can be empty for one-time play
+        () => {
+          // Release lock when done
+          set({ isPlaying: false, isChunkPlaying: false })
+          if (noiseEnabled) audioService.stopNoise()
+        },
+        0, // chunkGap: no gap for one-time play
+        'silent', // gapSound
+        1.0, // playbackRate
+        'edge', // provider - will fallback based on settings
+        { apiKey: '' },
+        'browser',
+        activeMaterial?.config.speaker_gender || 'male-female'
+      )
+    } catch (error) {
+      console.error('Chunk playback error:', error)
+      set({ isPlaying: false, isChunkPlaying: false })
+    }
+  },
 }))
 
 initializeStore().then(({ settings, materials }) => {

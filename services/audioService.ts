@@ -601,6 +601,19 @@ export class AudioService {
     this.stopNoise()
   }
 
+  // Cancel all audio playback (AudioContext + Speech Synthesis)
+  cancelAllPlayback(): void {
+    this.stop() // Stops AudioContext source
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel() // Stops TTS
+    }
+  }
+
+  // Check if anything is currently playing
+  isCurrentlyPlaying(): boolean {
+    return this.currentSource !== null
+  }
+
   getAudioState(): { isPlaying: boolean; currentTime: number } {
     return {
       isPlaying: this.currentSource !== null,

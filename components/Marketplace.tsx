@@ -143,6 +143,18 @@ export const Marketplace: React.FC = () => {
     }
   }
 
+  const toggleVisibility = async (material: CommunityMaterial, makePublic: boolean) => {
+    try {
+      await communityService.toggleMaterialVisibility(material.id, makePublic)
+      // Refresh the materials list
+      loadMaterials(true)
+      alert(makePublic ? 'Material is now public!' : 'Material is now private!')
+    } catch (error) {
+      console.error('Failed to toggle visibility:', error)
+      alert('Failed to change material visibility')
+    }
+  }
+
   const filterOptions: { value: MaterialFilter; label: string; icon: React.ReactNode }[] = [
     { value: 'public', label: 'Public', icon: <Globe className="w-4 h-4" /> },
     { value: 'my-public', label: 'My Public', icon: <User className="w-4 h-4" /> },
@@ -264,9 +276,22 @@ export const Marketplace: React.FC = () => {
                 <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">
                   {material.title}
                 </h3>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4 line-clamp-2">
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-2 line-clamp-2">
                   {material.description}
                 </p>
+
+                {/* Author display */}
+                {filter === 'my-public' || filter === 'my-private' ? (
+                  <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 mb-3 font-medium">
+                    <User className="w-3 h-3" />
+                    <span>You</span>
+                  </div>
+                ) : material.sf_user_profiles?.nickname ? (
+                  <div className="flex items-center gap-2 text-xs text-indigo-600 dark:text-indigo-400 mb-3 font-medium">
+                    <User className="w-3 h-3" />
+                    <span>{material.sf_user_profiles.nickname}</span>
+                  </div>
+                ) : null}
 
                 <div className="flex flex-wrap gap-2 mb-4">
                   {(material.tags || []).slice(0, 3).map((tag: string) => (
@@ -285,15 +310,43 @@ export const Marketplace: React.FC = () => {
                     {material.duration}s
                   </span>
                   <span className="flex items-center gap-1">
-                    <Users className="w-3 h-3" />
+                    {material.is_public ? (
+                      <Globe className="w-3 h-3 text-blue-500" />
+                    ) : (
+                      <Lock className="w-3 h-3 text-zinc-500" />
+                    )}
                     {material.sf_material_analytics?.total_users || 0} {t.market_users || 'users'}
                   </span>
                 </div>
 
-                <Button onClick={() => downloadMaterial(material)} className="w-full gap-2">
-                  <Download className="w-4 h-4" />
-                  {t.btn_download || 'Download'}
-                </Button>
+                {filter === 'my-public' || filter === 'my-private' ? (
+                  <div className="flex gap-2">
+                    {filter === 'my-public' && (
+                      <Button
+                        onClick={() => toggleVisibility(material, false)}
+                        variant="outline"
+                        className="flex-1 gap-2"
+                      >
+                        <Lock className="w-4 h-4" />
+                        Make Private
+                      </Button>
+                    )}
+                    {filter === 'my-private' && (
+                      <Button
+                        onClick={() => toggleVisibility(material, true)}
+                        className="flex-1 gap-2"
+                      >
+                        <Globe className="w-4 h-4" />
+                        Make Public
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <Button onClick={() => downloadMaterial(material)} className="w-full gap-2">
+                    <Download className="w-4 h-4" />
+                    {t.btn_download || 'Download'}
+                  </Button>
+                )}
               </div>
             ))}
           </div>

@@ -4,13 +4,15 @@ import { userIdentityService } from './userIdentityService'
 import { StudyMaterial } from '../types'
 
 function generateTextHash(text: string): string {
+  // Use a more robust hashing approach
+  const normalizedText = text.trim().toLowerCase().replace(/\s+/g, ' ')
   let hash = 0
-  for (let i = 0; i < text.length; i++) {
-    const char = text.charCodeAt(i)
+  for (let i = 0; i < normalizedText.length; i++) {
+    const char = normalizedText.charCodeAt(i)
     hash = (hash << 5) - hash + char
-    hash = hash & hash
+    hash = hash & hash // Convert to 32-bit integer
   }
-  return Math.abs(hash).toString(16).padStart(8, 'f')
+  return Math.abs(hash).toString(16).padStart(8, '0')
 }
 
 export interface CommunityMaterial {
@@ -79,12 +81,29 @@ export class CommunityService {
 
     onProgress?.(30, 100)
 
+    const textHash = generateTextHash(material.original_text)
+
+    onProgress?.(40, 100)
+
+    // Check if material with same text already exists
+    const { data: existingMaterial } = await supabase
+      .from('sf_materials')
+      .select('id, title')
+      .eq('text_hash', textHash)
+      .single()
+
+    if (existingMaterial) {
+      throw new Error(
+        `Material already exists: "${existingMaterial.title}" (ID: ${existingMaterial.id})`
+      )
+    }
+
     const materialData = {
       title: material.title,
       description: material.description,
       original_text: material.original_text,
-      text_hash: generateTextHash(material.original_text),
-      duration: material.duration,
+      text_hash: textHash,
+      duration: Math.round(material.duration),
       config: material.config,
       difficulty: material.config.difficulty,
       provider_type: material.config.provider_type,
@@ -116,8 +135,8 @@ export class CommunityService {
       chunk_index: index,
       text: chunk.text,
       translation: chunk.translation || null,
-      start_time: chunk.start_time,
-      end_time: chunk.end_time,
+      start_time: parseFloat(chunk.start_time.toString()),
+      end_time: parseFloat(chunk.end_time.toString()),
       speaker: chunk.speaker || null,
     }))
 
@@ -248,6 +267,22 @@ export class CommunityService {
     }
 
     await userIdentityService.incrementPublishCount(material.is_public ? 'public' : 'private')
+  }
+
+  async toggleMaterialVisibility(materialId: string, isPublic: boolean): Promise<void> {
+    const { error } = await supabase
+      .from('sf_materials')
+      .update({ is_public: isPublic })
+      .eq('id', materialId)
+      .eq('user_uuid', userIdentityService.getOrCreateUUID())
+
+    if (error) {
+      console.error('Error toggling material visibility:', error)
+      throw error
+    }
+
+    // Update publish count
+    await userIdentityService.incrementPublishCount(isPublic ? 'public' : 'private')
   }
 
   private convertToStudyMaterial(data: any): StudyMaterial {

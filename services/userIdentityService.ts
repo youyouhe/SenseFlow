@@ -313,7 +313,7 @@ export class UserIdentityService {
     const field = type === 'public' ? 'public_count' : 'private_count'
 
     const { error } = await supabase.rpc('increment_publish_count', {
-      user_uuid: uuid,
+      user_uuid_input: uuid,
       count_type: field,
     })
 

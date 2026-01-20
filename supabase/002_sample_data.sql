@@ -14,7 +14,7 @@ VALUES (
 ) ON CONFLICT (id) DO NOTHING;
 
 -- Sample English Learning Materials
-INSERT INTO sf_materials (id, title, description, original_text, duration, config, difficulty, provider_type, tags, is_public, author_id) VALUES
+INSERT INTO sf_materials (id, title, description, original_text, duration, config, difficulty, provider_type, tags, is_public, user_uuid) VALUES
 (
   uuid_generate_v4(),
   'Daily Conversation Basics',

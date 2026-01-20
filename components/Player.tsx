@@ -24,6 +24,7 @@ import {
   Gauge,
   Music,
   User,
+  ChevronUp,
 } from 'lucide-react'
 import { Button } from './ui/Button'
 import { translations } from '../services/translations'
@@ -78,45 +79,18 @@ export const Player = () => {
     null
   )
   const [quickSpeaker, setQuickSpeaker] = useState(settings.cosyvoiceSpeaker || '中文女')
-  const [isChangingSpeaker, setIsChangingSpeaker] = useState(false)
-  const [availableSpeakers, setAvailableSpeakers] = useState<string[]>([])
-  const [isLoadingSpeakers, setIsLoadingSpeakers] = useState(false)
+  const [showAdvancedControls, setShowAdvancedControls] = useState(false)
 
   // Refs for auto-scrolling
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const activeChunkRef = useRef<HTMLElement>(null)
 
-  // Fetch available speakers from CosyVoice API
+  // Sync current speaker with settings
   useEffect(() => {
-    const fetchSpeakers = async () => {
-      if (settings.ttsMode === 'cosyvoice') {
-        setIsLoadingSpeakers(true)
-        try {
-          const response = await fetch(
-            `${settings.cosyvoiceApiUrl || 'http://localhost:9880'}/speakers`
-          )
-          if (response.ok) {
-            const data = await response.json()
-            if (data.speakers && data.speakers.length > 0) {
-              setAvailableSpeakers(data.speakers)
-              if (!quickSpeaker && data.speakers.length > 0) {
-                setQuickSpeaker(data.speakers[0])
-              }
-            } else {
-              setAvailableSpeakers(['中文女', '中文男', '英文女', '英文男'])
-            }
-          } else {
-            setAvailableSpeakers(['中文女', '中文男', '英文女', '英文男'])
-          }
-        } catch (error) {
-          console.warn('Failed to fetch speakers:', error)
-          setAvailableSpeakers(['中文女', '中文男', '英文女', '英文男'])
-        }
-        setIsLoadingSpeakers(false)
-      }
+    if (settings.ttsMode === 'cosyvoice' && settings.cosyvoiceSpeaker !== quickSpeaker) {
+      setQuickSpeaker(settings.cosyvoiceSpeaker || '中文女')
     }
-    fetchSpeakers()
-  }, [settings.ttsMode, settings.cosyvoiceApiUrl])
+  }, [settings.ttsMode, settings.cosyvoiceSpeaker, quickSpeaker])
 
   // --- TTS Speak Function ---
   const speakText = async (text: string, chunk?: Chunk) => {
@@ -411,16 +385,16 @@ export const Player = () => {
   return (
     <div className="h-full flex flex-col relative overflow-hidden bg-background transition-colors duration-300">
       {/* Top Bar */}
-      <div className="absolute top-0 left-0 right-0 p-6 z-10 bg-gradient-to-b from-background via-background/95 to-transparent flex justify-between items-start pointer-events-none">
+      <div className="absolute top-0 left-0 right-0 p-4 z-10 bg-gradient-to-b from-background via-background/95 to-transparent flex justify-between items-start pointer-events-none">
         <div className="pointer-events-auto">
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">
+          <h1 className="text-xl font-bold text-zinc-900 dark:text-white">
             {activeMaterial.title}
           </h1>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 mt-0.5">
             <span className="px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 text-xs font-medium border border-indigo-500/20">
               {playerViewMode === 'chunk' ? t.player_chunk_mode : t.player_full_mode}
             </span>
-            <span className="text-zinc-500 text-sm">• {activeMaterial.config.difficulty}</span>
+            <span className="text-zinc-500 text-xs">• {activeMaterial.config.difficulty}</span>
           </div>
         </div>
 
@@ -775,286 +749,229 @@ export const Player = () => {
             <span>{formatTime(duration)}</span>
           </div>
 
-          {/* Controls Layout */}
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => seek(Math.max(0, currentTime - 5))}
-                title={t.player_rewind || 'Rewind 5s'}
-                className="text-zinc-500 hover:text-indigo-600 dark:hover:text-white transition"
-              >
-                <Rewind className="w-6 h-6" />
-              </button>
+          {/* Row 1: Core Playback Controls */}
+          <div className="flex items-center justify-center gap-4">
+            <button
+              onClick={() => seek(Math.max(0, currentTime - 5))}
+              title={t.player_rewind || 'Rewind 5s'}
+              className="text-zinc-500 hover:text-indigo-600 dark:hover:text-white transition"
+            >
+              <Rewind className="w-6 h-6" />
+            </button>
 
-              <button
-                onClick={() => {
-                  if (isPlaying) {
-                    setStopAfterCurrentChunk(true)
-                  } else {
-                    setStopAfterCurrentChunk(false)
-                    play()
-                  }
-                }}
-                disabled={false}
-                title={
-                  isPlaying
-                    ? t.player_stop_after || 'Stop after current chunk'
-                    : t.player_play || 'Play'
-                }
-                className={`w-14 h-14 flex items-center justify-center rounded-full text-white transition shadow-lg shadow-indigo-500/30 ${
-                  isLoadingAudio ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700'
-                }`}
-              >
-                {isLoadingAudio ? (
-                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Play className="w-6 h-6 fill-current ml-1" />
-                )}
-              </button>
-
-              <button
-                onClick={() => {
+            <button
+              onClick={() => {
+                if (isPlaying) {
+                  setStopAfterCurrentChunk(true)
+                } else {
                   setStopAfterCurrentChunk(false)
-                  audioService.stop()
-                  if (noiseEnabled) {
-                    audioService.stopNoise()
-                  }
-                  useStore.setState({ isPlaying: false, currentTime: 0, currentChunkIndex: 0 })
-                }}
-                title={t.player_restart || 'Restart from beginning'}
-                className="text-zinc-500 hover:text-indigo-600 dark:hover:text-white transition"
-              >
-                <RotateCcw className="w-6 h-6" />
-              </button>
+                  play()
+                }
+              }}
+              disabled={false}
+              title={
+                isPlaying
+                  ? t.player_stop_after || 'Stop after current chunk'
+                  : t.player_play || 'Play'
+              }
+              className={`w-16 h-16 flex items-center justify-center rounded-full text-white transition shadow-lg shadow-indigo-500/30 ${
+                isLoadingAudio ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700'
+              }`}
+            >
+              {isLoadingAudio ? (
+                <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Play className="w-6 h-6 fill-current ml-1" />
+              )}
+            </button>
 
-              <button
-                onClick={() => seek(Math.min(duration, currentTime + 5))}
-                title={t.player_forward || 'Forward 5s'}
-                className="text-zinc-500 hover:text-indigo-600 dark:hover:text-white transition"
-              >
-                <SkipForward className="w-6 h-6" />
-              </button>
+            <button
+              onClick={() => {
+                setStopAfterCurrentChunk(false)
+                audioService.stop()
+                if (noiseEnabled) {
+                  audioService.stopNoise()
+                }
+                useStore.setState({ isPlaying: false, currentTime: 0, currentChunkIndex: 0 })
+              }}
+              title={t.player_restart || 'Restart from beginning'}
+              className="text-zinc-500 hover:text-indigo-600 dark:hover:text-white transition"
+            >
+              <RotateCcw className="w-6 h-6" />
+            </button>
+
+            <button
+              onClick={() => seek(Math.min(duration, currentTime + 5))}
+              title={t.player_forward || 'Forward 5s'}
+              className="text-zinc-500 hover:text-indigo-600 dark:hover:text-white transition"
+            >
+              <SkipForward className="w-6 h-6" />
+            </button>
+          </div>
+
+          {/* Row 2: Essential Controls */}
+          <div className="flex flex-wrap items-center justify-center gap-6 bg-secondary p-3 rounded-xl border border-border">
+            {/* Voice Volume */}
+            <div className="flex items-center gap-2">
+              <Volume2 className="w-4 h-4 text-indigo-500" />
+              <div className="w-20">
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={voiceVolume}
+                  onChange={e => setVoiceVolume(parseFloat(e.target.value))}
+                  className="w-full accent-indigo-500 h-1 bg-zinc-300 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
             </div>
 
-            <div className="flex items-center gap-8 bg-secondary p-3 rounded-xl border border-border">
-              {/* Voice Volume */}
-              <div className="flex items-center gap-3">
-                <Volume2 className="w-4 h-4 text-indigo-500" />
-                <div className="w-24">
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={voiceVolume}
-                    onChange={e => setVoiceVolume(parseFloat(e.target.value))}
-                    className="w-full accent-indigo-500 h-1 bg-zinc-300 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer"
-                  />
-                </div>
+            {/* Playback Rate */}
+            <div className="flex items-center gap-2">
+              <div title={t.player_playback_rate || 'Playback Speed'}>
+                <Gauge className="w-4 h-4 text-amber-500" />
               </div>
-
-              <div className="w-px h-8 bg-border mx-2"></div>
-
-              {/* Chunk Gap Control */}
-              <div className="flex items-center gap-3">
-                <div title={t.player_gap || 'Gap between chunks'}>
-                  <Clock className="w-4 h-4 text-emerald-500" />
-                </div>
-                <div className="w-20">
-                  <input
-                    type="range"
-                    min="0"
-                    max="3"
-                    step="0.5"
-                    value={chunkGap}
-                    onChange={e => setChunkGap(parseFloat(e.target.value))}
-                    className="w-full accent-emerald-500 h-1 bg-zinc-300 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer"
-                    title={t.player_gap || 'Gap between chunks'}
-                  />
-                </div>
-                <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider w-8">
-                  {chunkGap}s
-                </span>
+              <div className="w-20">
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2.0"
+                  step="0.1"
+                  value={playbackRate}
+                  onChange={e => setPlaybackRate(parseFloat(e.target.value))}
+                  className="w-full accent-amber-500 h-1 bg-zinc-300 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer"
+                  title={t.player_playback_rate || 'Playback Speed'}
+                />
               </div>
+              <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                {playbackRate.toFixed(1)}x
+              </span>
+            </div>
 
-              {/* Gap Sound Control */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setGapSound('beep')}
-                  className={`px-2 py-1 rounded text-xs transition ${
-                    gapSound === 'beep'
-                      ? 'bg-emerald-500/20 text-emerald-600 border border-emerald-500/30'
-                      : 'text-zinc-500 hover:text-zinc-600'
+            {/* Noise Control */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleNoise}
+                className={`relative w-10 h-5 rounded-full transition-colors ${
+                  noiseEnabled ? 'bg-rose-500' : 'bg-zinc-600'
+                }`}
+                title={t.player_toggle_noise || 'Toggle background noise'}
+              >
+                <div
+                  className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                    noiseEnabled ? 'translate-x-5' : 'translate-x-0.5'
                   }`}
-                  title={t.player_gap_beep || 'Beep sound'}
-                >
-                  <span className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    {t.player_gap_beep || 'Beep'}
+                />
+              </button>
+
+              <div className={`transition-opacity ${noiseEnabled ? 'opacity-100' : 'opacity-40'}`}>
+                {noiseEnabled ? (
+                  <Waves className="w-4 h-4 text-rose-500" />
+                ) : (
+                  <VolumeX className="w-4 h-4 text-zinc-500" />
+                )}
+              </div>
+
+              <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                {t.player_noise_label}
+              </span>
+            </div>
+          </div>
+
+          {/* Controls Layout */}
+
+          {/* Row 3: Advanced Controls (Collapsible) */}
+          <div className="border-t border-border pt-4">
+            <button
+              onClick={() => setShowAdvancedControls(!showAdvancedControls)}
+              className="flex items-center gap-2 text-xs text-zinc-500 hover:text-indigo-600 mb-3 mx-auto transition-colors"
+            >
+              {showAdvancedControls ? '收起高级设置' : '展开高级设置'}
+              <ChevronUp
+                className={`w-4 h-4 transition-transform ${showAdvancedControls ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            <div
+              className={`transition-all ${showAdvancedControls ? 'opacity-100 max-h-96' : 'opacity-0 max-h-0 overflow-hidden'}`}
+            >
+              <div className="flex flex-wrap items-center justify-center gap-6 bg-secondary p-3 rounded-xl border border-border">
+                {/* Chunk Gap Control */}
+                <div className="flex items-center gap-2">
+                  <div title={t.player_gap || 'Gap between chunks'}>
+                    <Clock className="w-4 h-4 text-emerald-500" />
+                  </div>
+                  <div className="w-20">
+                    <input
+                      type="range"
+                      min="0"
+                      max="3"
+                      step="0.5"
+                      value={chunkGap}
+                      onChange={e => setChunkGap(parseFloat(e.target.value))}
+                      className="w-full accent-emerald-500 h-1 bg-zinc-300 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer"
+                      title={t.player_gap || 'Gap between chunks'}
+                    />
+                  </div>
+                  <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+                    {chunkGap}s
                   </span>
-                </button>
-                <button
-                  onClick={() => setGapSound('silent')}
-                  className={`px-2 py-1 rounded text-xs transition ${
-                    gapSound === 'silent'
-                      ? 'bg-emerald-500/20 text-emerald-600 border border-emerald-500/30'
-                      : 'text-zinc-500 hover:text-zinc-600'
-                  }`}
-                  title={t.player_gap_silent || 'Silent'}
-                >
-                  {t.player_gap_silent || 'Silent'}
-                </button>
-              </div>
-
-              <div className="w-px h-8 bg-border mx-2"></div>
-
-              {/* Playback Rate */}
-              <div className="flex items-center gap-3">
-                <div title={t.player_playback_rate || 'Playback Speed'}>
-                  <Gauge className="w-4 h-4 text-amber-500" />
                 </div>
-                <div className="w-20">
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="2.0"
-                    step="0.1"
-                    value={playbackRate}
-                    onChange={e => setPlaybackRate(parseFloat(e.target.value))}
-                    className="w-full accent-amber-500 h-1 bg-zinc-300 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer"
-                    title={t.player_playback_rate || 'Playback Speed'}
-                  />
+
+                {/* Gap Sound Control */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setGapSound('beep')}
+                    className={`px-2 py-1 rounded text-xs transition ${
+                      gapSound === 'beep'
+                        ? 'bg-emerald-500/20 text-emerald-600 border border-emerald-500/30'
+                        : 'text-zinc-500 hover:text-zinc-600'
+                    }`}
+                    title={t.player_gap_beep || 'Beep sound'}
+                  >
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      {t.player_gap_beep || 'Beep'}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setGapSound('silent')}
+                    className={`px-2 py-1 rounded text-xs transition ${
+                      gapSound === 'silent'
+                        ? 'bg-emerald-500/20 text-emerald-600 border border-emerald-500/30'
+                        : 'text-zinc-500 hover:text-zinc-600'
+                    }`}
+                    title={t.player_gap_silent || 'Silent'}
+                  >
+                    {t.player_gap_silent || 'Silent'}
+                  </button>
                 </div>
-                <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider w-10">
-                  {playbackRate.toFixed(1)}x
-                </span>
-              </div>
 
-              <div className="w-px h-8 bg-border mx-2"></div>
-
-              {/* Quick Speaker Selector (CosyVoice only) */}
-              {settings.ttsMode === 'cosyvoice' && (
-                <>
+                {/* Current Voice Display (CosyVoice only) */}
+                {settings.ttsMode === 'cosyvoice' && (
                   <div className="flex items-center gap-2">
                     <div title={t.settings_cosyvoice_title || 'Voice'}>
                       <User className="w-4 h-4 text-orange-500" />
                     </div>
-                    <select
-                      value={quickSpeaker}
-                      onChange={async e => {
-                        const newSpeaker = e.target.value
-                        setQuickSpeaker(newSpeaker)
-                        setIsChangingSpeaker(true)
-                        updateSettings({
-                          ...settings,
-                          cosyvoiceSpeaker: newSpeaker,
-                        })
-                        ;(audioService as any).audioCache?.clear()
-                        // Clear chunk words to trigger regeneration
-                        if (activeMaterial && currentChunkIndex < activeMaterial.chunks.length) {
-                          const chunk = activeMaterial.chunks[currentChunkIndex]
-                          chunk.words = undefined
-                          await play(currentChunkIndex, false)
-                        }
-                        setIsChangingSpeaker(false)
-                      }}
-                      disabled={isChangingSpeaker || isLoadingSpeakers}
-                      className="bg-background border border-border rounded-lg py-1 px-2 text-xs text-primary dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none cursor-pointer max-w-32"
-                    >
-                      {isLoadingSpeakers ? (
-                        <option value="">加载中...</option>
-                      ) : availableSpeakers.length > 0 ? (
-                        availableSpeakers.map(speaker => (
-                          <option key={speaker} value={speaker}>
-                            {speaker}
-                          </option>
-                        ))
-                      ) : (
-                        <>
-                          <option value="中文女">中文女</option>
-                          <option value="中文男">中文男</option>
-                          <option value="英文女">英文女</option>
-                          <option value="英文男">英文男</option>
-                          <option value="日语女">日语女</option>
-                          <option value="日语男">日语男</option>
-                          <option value="韩语女">韩语女</option>
-                          <option value="韩语男">韩语男</option>
-                        </>
-                      )}
-                    </select>
-                    {isChangingSpeaker && (
-                      <span className="text-xs text-orange-500 animate-pulse">生成中...</span>
-                    )}
+                    <span className="text-xs text-orange-600 dark:text-orange-400 font-medium">
+                      {quickSpeaker || '中文女'}
+                    </span>
                   </div>
-                  <div className="w-px h-8 bg-border mx-2"></div>
-                </>
-              )}
+                )}
 
-              {/* Noise Control */}
-              <div className="flex items-center gap-3">
-                {/* Noise Toggle Switch */}
-                <button
-                  onClick={toggleNoise}
-                  className={`relative w-10 h-5 rounded-full transition-colors ${
-                    noiseEnabled ? 'bg-rose-500' : 'bg-zinc-600'
-                  }`}
-                  title={t.player_toggle_noise || 'Toggle background noise'}
-                >
-                  <div
-                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                      noiseEnabled ? 'translate-x-5' : 'translate-x-0.5'
-                    }`}
-                  />
-                </button>
-
-                <div
-                  className={`transition-opacity ${noiseEnabled ? 'opacity-100' : 'opacity-40'}`}
-                >
-                  {noiseEnabled ? (
-                    <Waves className="w-4 h-4 text-rose-500" />
-                  ) : (
-                    <VolumeX className="w-4 h-4 text-zinc-500" />
-                  )}
-                </div>
-
-                <div className="w-20">
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={noiseVolume}
-                    onChange={e => setNoiseVolume(parseFloat(e.target.value))}
-                    disabled={!noiseEnabled}
-                    className={`w-full h-1 bg-zinc-300 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer ${noiseEnabled ? 'accent-rose-500' : 'accent-zinc-500'}`}
-                    title={t.player_voice_volume || 'Voice Volume'}
-                  />
-                </div>
-                <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
-                  {t.player_noise_label}
-                </span>
-
+                {/* Custom Noise Button */}
                 {settings.noiseType === 'custom' && settings.customNoiseData && (
                   <button
                     onClick={() => toggleNoise()}
-                    className="ml-2 p-2 rounded-lg bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition"
+                    className="p-2 rounded-lg bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition"
                     title={t.settings_noise_uploaded || 'Test custom noise'}
                   >
                     <Music className="w-4 h-4" />
                   </button>
                 )}
-
-                {settings.customNoiseData && settings.noiseType !== 'custom' && (
-                  <span className="ml-2 text-[10px] text-amber-500">
-                    (Select "Custom" to enable)
-                  </span>
-                )}
               </div>
             </div>
-
-            <Button variant="ghost" size="sm" className="hidden md:flex">
-              <Settings2 className="w-5 h-5" />
-            </Button>
           </div>
         </div>
       </div>

@@ -13,7 +13,7 @@ export interface MaterialWithAnalytics {
   provider_type: 'edge' | 'openai' | 'local' | 'gemini' | 'deepseek'
   tags: string[]
   is_public: boolean
-  author_id: string | null
+  user_uuid: string | null
   created_at: string
   updated_at: string
   sf_chunks: any[]
@@ -32,7 +32,7 @@ export class DataService {
           *,
           sf_chunks(id, chunk_index, text, translation, start_time, end_time),
           sf_material_analytics(total_users, avg_rating, total_plays),
-          author:author_id(username, avatar_url)
+          sf_user_profiles!sf_materials_user_uuid_fkey(nickname, email)
         `
         )
         .eq('is_public', true)
@@ -64,7 +64,7 @@ export class DataService {
           sf_material_analytics(total_users, avg_rating, total_plays)
         `
         )
-        .eq('author_id', userId)
+        .eq('user_uuid', userId)
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -84,7 +84,7 @@ export class DataService {
           *,
           sf_chunks(id, chunk_index, text, translation, start_time, end_time),
           sf_material_analytics(total_users, avg_rating, total_plays),
-          author:author_id(username, avatar_url)
+          sf_user_profiles!sf_materials_user_uuid_fkey(nickname, email)
         `
         )
         .eq('id', materialId)
@@ -133,6 +133,8 @@ export class DataService {
           ...chunk,
           material_id: materialId,
           chunk_index: index,
+          start_time: parseFloat(chunk.start_time?.toString() || '0'),
+          end_time: parseFloat(chunk.end_time?.toString() || '0'),
         }))
       )
 
@@ -405,7 +407,7 @@ export class DataService {
           *,
           sf_chunks(id, chunk_index, text, translation, start_time, end_time),
           sf_material_analytics(total_users, avg_rating, total_plays),
-          author:author_id(username, avatar_url)
+          sf_user_profiles!sf_materials_user_uuid_fkey(nickname, email)
         `
         )
         .or(`title.ilike.%${query}%,description.ilike.%${query}%,original_text.ilike.%${query}%`)
@@ -528,7 +530,7 @@ export class DataService {
         provider_type: material.config.provider_type,
         tags: material.config.tags || [],
         is_public: isPublic,
-        author_id: userId,
+        user_uuid: userId,
       }
 
       const { data: newMaterial, error: materialError } = await supabase
@@ -544,8 +546,8 @@ export class DataService {
         chunk_index: index,
         text: chunk.text,
         translation: chunk.translation || null,
-        start_time: chunk.start_time,
-        end_time: chunk.end_time,
+        start_time: parseFloat(chunk.start_time.toString()),
+        end_time: parseFloat(chunk.end_time.toString()),
         speaker: chunk.speaker || null,
       }))
 

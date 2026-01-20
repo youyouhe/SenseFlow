@@ -3,6 +3,16 @@ import { compressionService } from './compressionService'
 import { userIdentityService } from './userIdentityService'
 import { StudyMaterial } from '../types'
 
+function generateTextHash(text: string): string {
+  let hash = 0
+  for (let i = 0; i < text.length; i++) {
+    const char = text.charCodeAt(i)
+    hash = (hash << 5) - hash + char
+    hash = hash & hash
+  }
+  return Math.abs(hash).toString(16).padStart(8, 'f')
+}
+
 export interface CommunityMaterial {
   id: string
   title: string
@@ -73,6 +83,7 @@ export class CommunityService {
       title: material.title,
       description: material.description,
       original_text: material.original_text,
+      text_hash: generateTextHash(material.original_text),
       duration: material.duration,
       config: material.config,
       difficulty: material.config.difficulty,
@@ -105,8 +116,8 @@ export class CommunityService {
       chunk_index: index,
       text: chunk.text,
       translation: chunk.translation || null,
-      start_time: chunk.start_time,
-      end_time: chunk.end_time,
+      start_time: Number(chunk.start_time),
+      end_time: Number(chunk.end_time),
       speaker: chunk.speaker || null,
     }))
 

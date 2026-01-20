@@ -379,14 +379,17 @@ export const Settings = () => {
   }
 
   // Clear UUID handler
-  const handleClearUuid = () => {
+  const handleClearUuid = async () => {
     if (!confirm('确定要清除当前设备身份吗？清除后您可以通过邮箱恢复账户。此操作不可撤销。')) {
       return
     }
-    localStorage.removeItem('senseflow_user_uuid')
-    localStorage.removeItem('senseflow_user_nickname')
-    localStorage.removeItem('senseflow_user_email')
-    window.location.reload()
+    try {
+      await userIdentityService.clearUUID()
+      window.location.reload()
+    } catch (error) {
+      console.error('Error clearing UUID:', error)
+      alert('清除失败，请重试')
+    }
   }
 
   // Restore UUID handler

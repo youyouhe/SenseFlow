@@ -332,6 +332,28 @@ export class UserIdentityService {
     }
   }
 
+  /**
+   * Clear current UUID and all associated local data
+   * This is used when user wants to reset their device identity
+   */
+  async clearUUID(): Promise<void> {
+    // Clear localStorage
+    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(STORAGE_EMAIL)
+    localStorage.removeItem(STORAGE_NICKNAME)
+
+    // Clear IndexedDB user data
+    try {
+      await storageManager.clearUserData()
+      console.log('[UserIdentityService] Cleared UUID and user data')
+    } catch (error) {
+      console.warn('[UserIdentityService] Failed to clear user data:', error)
+    }
+
+    // Notify listeners
+    uuidChangeListeners.forEach(callback => callback())
+  }
+
   async getQuota(): Promise<UserQuota> {
     const uuid = this.getUUID()
     if (!uuid) {

@@ -19,6 +19,9 @@ export class AudioService {
   private audioCache: Map<string, AudioBuffer> = new Map()
   private cacheMaxSize: number = 50
 
+  // Playback lock to prevent multiple simultaneous playbacks
+  private playbackLock: boolean = false
+
   constructor() {
     if (typeof window !== 'undefined') {
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -255,6 +258,12 @@ export class AudioService {
     this.initializeAudio()
     if (!this.audioContext) throw new Error('Audio context not available')
 
+    // Acquire playback lock - if already playing, ignore this request
+    if (!this.acquirePlaybackLock()) {
+      console.warn('AudioService: Already playing, skipping duplicate playChunk call')
+      return
+    }
+
     if (this.audioContext.state === 'suspended') {
       await this.audioContext.resume()
     }
@@ -308,6 +317,7 @@ export class AudioService {
       )
     } catch (error) {
       console.error('Failed to generate speech:', error)
+      this.playbackLock = false // Release lock on error
       throw error
     }
   }
@@ -344,6 +354,7 @@ export class AudioService {
 
     this.currentSource.onended = () => {
       if (progressInterval) clearInterval(progressInterval)
+      this.playbackLock = false // Release lock when audio ends
       if (gapSeconds > 0) {
         if (gapSound === 'beep') {
           this.playBeepSound()
@@ -496,6 +507,7 @@ export class AudioService {
 
       utterance.onend = () => {
         if (progressInterval) clearInterval(progressInterval)
+        this.playbackLock = false // Release lock when TTS ends
         if (gapSeconds > 0) {
           if (gapSound === 'beep') {
             this.playBeepSound()
@@ -513,6 +525,7 @@ export class AudioService {
       utterance.onerror = event => {
         console.warn('Browser TTS error:', event)
         if (progressInterval) clearInterval(progressInterval)
+        this.playbackLock = false // Release lock on error
         if (onComplete) onComplete()
         resolve()
       }
@@ -607,6 +620,17 @@ export class AudioService {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel() // Stops TTS
     }
+    this.playbackLock = false // Release the lock
+  }
+
+  // Acquire playback lock
+  private acquirePlaybackLock(): boolean {
+    if (this.playbackLock) {
+      console.warn('AudioService: Playback already in progress, ignoring new request')
+      return false
+    }
+    this.playbackLock = true
+    return true
   }
 
   // Check if anything is currently playing

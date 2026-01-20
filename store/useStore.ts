@@ -60,6 +60,7 @@ interface PlayerState {
   stopAfterCurrentChunk: boolean
   isLoopMode: boolean
   loopSource: 'play-button' | 'chunk-click' | null
+  currentPlayToken: number // Token to track the current play session and prevent stale callbacks
   voiceVolume: number
   noiseVolume: number
   noiseEnabled: boolean
@@ -141,6 +142,7 @@ export const useStore = create<PlayerState>((set, get) => ({
   stopAfterCurrentChunk: false,
   isLoopMode: false,
   loopSource: null,
+  currentPlayToken: 0,
   voiceVolume: 1.0,
   noiseVolume: 0.3,
   noiseEnabled: true,
@@ -230,6 +232,10 @@ export const useStore = create<PlayerState>((set, get) => ({
     const shouldAutoPlay = settings.autoPlayNext !== undefined ? settings.autoPlayNext : false
     const shouldSeamless = settings.seamlessPlayback === true && shouldAutoPlay
     const isCustomNoise = settings.noiseType === 'custom' && settings.customNoiseData
+
+    // Increment play token to invalidate any previous play callbacks
+    const playToken = (get().currentPlayToken ?? 0) + 1
+    set({ currentPlayToken: playToken })
 
     if (activeMaterial && currentIndex < activeMaterial.chunks.length) {
       const chunk = activeMaterial.chunks[currentIndex]
@@ -327,16 +333,25 @@ export const useStore = create<PlayerState>((set, get) => ({
         await audioService.playChunk(
           chunk,
           audioElapsedTime => {
+            // Check if this callback is still valid (token hasn't changed)
+            if (get().currentPlayToken !== playToken) return
+
             // 修复：基于chunk开始时间和音频播放进度计算绝对时间
             // 只有当音频真正有进度产生时，才确保isGap为false
             set({ currentTime: chunk.start_time + audioElapsedTime, isGap: false })
           },
           () => {
+            // Check if this callback is still valid (token hasn't changed)
+            if (get().currentPlayToken !== playToken) {
+              console.log('Play token mismatch, ignoring stale callback')
+              return
+            }
+
             clearTimeout(loadingTimeout)
             // 音频播放结束，进入Gap状态
             set({ isLoadingAudio: false, currentChunkIndex: currentIndex, isGap: true })
 
-            const { stopAfterCurrentChunk } = get()
+            const { stopAfterCurrentChunk, isLoopMode } = get()
             if (stopAfterCurrentChunk) {
               set({ isPlaying: false, stopAfterCurrentChunk: false })
               if (noiseEnabled) {
@@ -345,7 +360,8 @@ export const useStore = create<PlayerState>((set, get) => ({
               return
             }
 
-            if (shouldAutoPlay) {
+            // 循环模式或自动播放：继续下一个chunk
+            if (shouldAutoPlay || isLoopMode) {
               const nextIndex = currentIndex + 1
               if (nextIndex < activeMaterial.chunks.length) {
                 const nextChunk = activeMaterial.chunks[nextIndex]
@@ -372,9 +388,20 @@ export const useStore = create<PlayerState>((set, get) => ({
                   }
                 }
               } else {
-                set({ isPlaying: false, isGap: false })
-                if (noiseEnabled) {
-                  audioService.stopNoise()
+                // 循环模式：从头开始
+                if (isLoopMode) {
+                  set({
+                    currentChunkIndex: 0,
+                    currentTime: activeMaterial.chunks[0].start_time,
+                    isGap: false,
+                    isLoadingAudio: true,
+                  })
+                  get().play(0, false)
+                } else {
+                  set({ isPlaying: false, isGap: false })
+                  if (noiseEnabled) {
+                    audioService.stopNoise()
+                  }
                 }
               }
             } else {

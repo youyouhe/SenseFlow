@@ -251,30 +251,53 @@ export const Player = () => {
     }
   }
 
-  // Handle chunk click/double-click
+  // Handle chunk click (single click to seek during playback, or play chunk when paused)
   const handleChunkClick = (chunk: Chunk, e: React.MouseEvent) => {
-    if (settings.clickToSpeak) {
-      if (e.detail === 2) {
-        e.preventDefault()
-        speakText(chunk.text, chunk)
-      }
-    }
     if (e.detail === 1) {
-      seek(chunk.start_time)
+      e.preventDefault()
+      if (isPlaying) {
+        // During playback: stop all audio first, then seek to chunk and continue playing
+        const chunkIndex = activeMaterial?.chunks.findIndex(c => c.id === chunk.id) ?? 0
+        // Cancel all audio playback including TTS
+        audioService.cancelAllPlayback()
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel()
+        }
+        seek(chunk.start_time)
+        useStore.setState({ currentChunkIndex: chunkIndex })
+        play(chunkIndex, false)
+      } else if (settings.clickToSpeak) {
+        // When paused: speak the chunk text
+        speakText(chunk.text, chunk)
+      } else {
+        // When paused and clickToSpeak disabled: just seek
+        seek(chunk.start_time)
+      }
     }
   }
 
-  // Handle full-text chunk click (single click to seek, double click to speak)
+  // Handle full-text chunk click (single click to seek during playback, or play chunk when paused)
   const handleFullTextChunkClick = (chunk: Chunk, e: React.MouseEvent) => {
-    if (settings.enableClickSpeakInFullMode && settings.clickToSpeak) {
-      if (e.detail === 2) {
-        e.preventDefault()
-        speakText(chunk.text, chunk)
-        return
-      }
-    }
     if (e.detail === 1) {
-      seek(chunk.start_time)
+      e.preventDefault()
+      if (isPlaying) {
+        // During playback: stop all audio first, then seek to chunk and continue playing
+        const chunkIndex = activeMaterial?.chunks.findIndex(c => c.id === chunk.id) ?? 0
+        // Cancel all audio playback including TTS
+        audioService.cancelAllPlayback()
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel()
+        }
+        seek(chunk.start_time)
+        useStore.setState({ currentChunkIndex: chunkIndex })
+        play(chunkIndex, false)
+      } else if (settings.enableClickSpeakInFullMode && settings.clickToSpeak) {
+        // When paused: speak the chunk text
+        speakText(chunk.text, chunk)
+      } else {
+        // When paused and click speak disabled: just seek
+        seek(chunk.start_time)
+      }
     }
   }
 

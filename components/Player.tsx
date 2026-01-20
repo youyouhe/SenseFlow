@@ -75,8 +75,6 @@ export const Player = () => {
     isLoopMode,
     loopSource,
     toggleLoopMode,
-    setLoopMode,
-    playChunkOnce,
   } = useStore()
   const t = translations[settings.language]
 
@@ -98,18 +96,184 @@ export const Player = () => {
     }
   }, [settings.ttsMode, settings.cosyvoiceSpeaker, quickSpeaker])
 
-  // Handle chunk click - simplified with lock mechanism
-  const handleChunkClick = (chunk: Chunk, e: React.MouseEvent) => {
-    e.preventDefault()
-    playChunkOnce(chunk)
+  // --- TTS Speak Function ---
+  const speakText = async (text: string, chunk?: Chunk) => {
+    // Stop any currently playing audio
+    audioService.stop()
+
+    // If chunk has pre-generated audioData, use it
+    if (chunk?.audioData) {
+      try {
+        const { base64ToArrayBuffer } = await import('../services/audioUtils')
+        const arrayBuffer = base64ToArrayBuffer(chunk.audioData)
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+
+        // Play the audio
+        const source = audioContext.createBufferSource()
+        source.buffer = audioBuffer
+
+        const gainNode = audioContext.createGain()
+        gainNode.gain.value = voiceVolume
+
+        source.connect(gainNode)
+        gainNode.connect(audioContext.destination)
+
+        source.start()
+        return
+      } catch (error) {
+        console.warn('Failed to play pre-generated audio, falling back to TTS:', error)
+      }
+    }
+
+    // Fall back to browser TTS
+    if ('speechSynthesis' in window && settings.clickToSpeak) {
+      window.speechSynthesis.cancel()
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.rate = 0.9
+      utterance.pitch = 1
+      utterance.volume = voiceVolume
+
+      const voices = speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'))
+      console.log(
+        'Available English voices:',
+        voices.map(v => v.name)
+      )
+      let selectedVoice = null
+
+      if (chunk && activeMaterial?.config.content_type === 'dialogue' && chunk.speaker) {
+        const speakerGender = activeMaterial.config.speaker_gender || 'male-female'
+        console.log('Dialogue speaker_gender:', speakerGender)
+        const isSpeakerA = chunk.speaker === 'A'
+        console.log('Chunk speaker:', chunk.speaker, 'isSpeakerA:', isSpeakerA)
+        const speakerType = isSpeakerA ? speakerGender.split('-')[0] : speakerGender.split('-')[1]
+        console.log('Determined speakerType:', speakerType)
+
+        if (speakerType === 'male') {
+          const malePatterns = [
+            'male',
+            'Male',
+            'David',
+            'Alex',
+            'Daniel',
+            'George',
+            'Mark',
+            'Adam',
+            'John',
+            'James',
+            'Tom',
+            'Ben',
+            'Michael',
+          ]
+          const maleVoices = voices.filter(
+            v =>
+              !v.name.toLowerCase().includes('female') && malePatterns.some(p => v.name.includes(p))
+          )
+          console.log(
+            'Male voices matched:',
+            maleVoices.map(v => v.name)
+          )
+          if (maleVoices.length > 0) {
+            selectedVoice = maleVoices[0]
+          } else {
+            const nonFemale = voices.filter(v => !v.name.toLowerCase().includes('female'))
+            console.log(
+              'Non-female voices:',
+              nonFemale.map(v => v.name)
+            )
+            if (nonFemale.length > 0) {
+              selectedVoice = nonFemale[0]
+            }
+          }
+          console.log('Selected male voice:', selectedVoice?.name || 'NONE')
+        } else {
+          const femalePatterns = [
+            'female',
+            'Female',
+            'Zira',
+            'Samantha',
+            'Victoria',
+            'Susan',
+            'Karen',
+            'Tessa',
+            'Emily',
+            'Olivia',
+            'Ava',
+          ]
+          const femaleVoices = voices.filter(v => femalePatterns.some(p => v.name.includes(p)))
+          console.log(
+            'Female voices matched:',
+            femaleVoices.map(v => v.name)
+          )
+          if (femaleVoices.length > 0) {
+            selectedVoice = femaleVoices[0]
+          } else {
+            const withFemale = voices.filter(v => v.name.toLowerCase().includes('female'))
+            console.log(
+              'Voices with "female":',
+              withFemale.map(v => v.name)
+            )
+            if (withFemale.length > 0) {
+              selectedVoice = withFemale[0]
+            }
+          }
+          console.log('Selected female voice:', selectedVoice?.name || 'NONE')
+        }
+      }
+
+      if (!selectedVoice) {
+        const fallbackVoice = voices.find(
+          v =>
+            v.name.includes('Natural') ||
+            v.name.includes('Premium') ||
+            v.name.includes('Microsoft') ||
+            v.name.includes('Google')
+        )
+        console.log(
+          'Fallback voice (Natural/Premium/Microsoft/Google):',
+          fallbackVoice?.name || 'NONE'
+        )
+        selectedVoice = fallbackVoice
+      }
+
+      if (!selectedVoice && voices.length > 0) {
+        console.log('Final fallback: using first voice:', voices[0].name)
+        selectedVoice = voices[0]
+      }
+
+      console.log('FINAL selected voice:', selectedVoice?.name || 'NONE')
+
+      if (selectedVoice) {
+        utterance.voice = selectedVoice
+      }
+
+      window.speechSynthesis.speak(utterance)
+    }
   }
 
-  // Handle full-text chunk click - simplified with lock mechanism
+  // Handle chunk click/double-click
+  const handleChunkClick = (chunk: Chunk, e: React.MouseEvent) => {
+    if (settings.clickToSpeak) {
+      if (e.detail === 2) {
+        e.preventDefault()
+        speakText(chunk.text, chunk)
+      }
+    }
+    if (e.detail === 1) {
+      seek(chunk.start_time)
+    }
+  }
+
+  // Handle full-text chunk click (single click to seek, double click to speak)
   const handleFullTextChunkClick = (chunk: Chunk, e: React.MouseEvent) => {
-    e.preventDefault()
     if (settings.enableClickSpeakInFullMode && settings.clickToSpeak) {
-      playChunkOnce(chunk)
-    } else {
+      if (e.detail === 2) {
+        e.preventDefault()
+        speakText(chunk.text, chunk)
+        return
+      }
+    }
+    if (e.detail === 1) {
       seek(chunk.start_time)
     }
   }
@@ -444,25 +608,14 @@ export const Player = () => {
                   ref={active ? (activeChunkRef as React.RefObject<HTMLDivElement>) : null}
                   onClick={e => handleChunkClick(chunk, e)}
                   className={`
-                     transition-all duration-300 cursor-pointer rounded-xl p-4 flex flex-col items-center relative
+                     transition-all duration-300 cursor-pointer rounded-xl p-4 flex flex-col items-center
                      ${
                        active
                          ? 'bg-indigo-500/10 scale-105 border-indigo-500/50 border shadow-lg shadow-indigo-500/10'
                          : 'hover:bg-zinc-100 dark:hover:bg-zinc-800/50 border border-transparent opacity-60 hover:opacity-100'
                      }
-                     ${
-                       isLoopMode && loopSource === 'chunk-click' && active
-                         ? 'ring-2 ring-amber-500 ring-offset-2'
-                         : ''
-                     }
                    `}
                 >
-                  {/* Loop indicator for chunk mode */}
-                  {isLoopMode && loopSource === 'chunk-click' && active && (
-                    <div className="absolute top-2 right-2 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center">
-                      <Repeat className="w-3 h-3 text-white" />
-                    </div>
-                  )}
                   {isDialogue && speakerName && (
                     <span
                       className={`text-xs font-bold uppercase tracking-wider mb-2 ${
@@ -528,12 +681,6 @@ export const Player = () => {
 
                 return (
                   <React.Fragment key={chunk.id}>
-                    {/* Loop indicator for full-text mode */}
-                    {isLoopMode && loopSource === 'chunk-click' && active && (
-                      <span className="inline-block w-4 h-4 bg-amber-500 rounded-full text-white text-xs flex items-center justify-center mr-2 align-middle">
-                        <Repeat className="w-2 h-2" />
-                      </span>
-                    )}
                     {isDialogue && speakerName && (
                       <span
                         className={`text-xs font-bold uppercase tracking-wider mr-2 ${getSpeakerLabelColor()}`}
@@ -552,7 +699,6 @@ export const Player = () => {
                             : 'text-zinc-600 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                         }
                         ${isDialogue ? getSpeakerColor() : ''}
-                        ${isLoopMode && loopSource === 'chunk-click' && active ? 'ring-2 ring-amber-500 ring-offset-1' : ''}
                       `}
                     >
                       {renderTextWithWordHighlighting(chunk, active)}
@@ -660,16 +806,16 @@ export const Player = () => {
 
             <button
               onClick={() => toggleLoopMode('play-button')}
-              title={
+              title={isLoopMode && loopSource === 'play-button' ? 'Disable loop' : 'Loop playback'}
+              className={`transition ${
                 isLoopMode && loopSource === 'play-button'
-                  ? 'Stop looping (play button)'
-                  : 'Loop playback (play button)'
-              }
-              className={`text-zinc-500 hover:text-indigo-600 dark:hover:text-white transition ${
-                isLoopMode && loopSource === 'play-button' ? 'text-indigo-600' : ''
+                  ? 'text-amber-500'
+                  : 'text-zinc-500 hover:text-indigo-600 dark:hover:text-white'
               }`}
             >
-              <Repeat className="w-6 h-6" />
+              <Repeat
+                className={`w-6 h-6 ${isLoopMode && loopSource === 'play-button' ? 'fill-current' : ''}`}
+              />
             </button>
 
             <button

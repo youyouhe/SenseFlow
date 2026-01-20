@@ -58,6 +58,8 @@ interface PlayerState {
   playbackRate: number
   currentChunkIndex: number
   stopAfterCurrentChunk: boolean
+  isLoopMode: boolean
+  loopSource: 'play-button' | 'chunk-click' | null
   voiceVolume: number
   noiseVolume: number
   noiseEnabled: boolean
@@ -110,6 +112,8 @@ interface PlayerState {
   setIsLoadingAudio: (loading: boolean) => void
   setStopAfterCurrentChunk: (stop: boolean) => void
   setGapSound: (sound: 'beep' | 'silent') => void
+  toggleLoopMode: (source: 'play-button' | 'chunk-click' | null) => void
+  setLoopMode: (enabled: boolean, source?: 'play-button' | 'chunk-click' | null) => void
   tick: (delta: number) => void
 }
 
@@ -135,6 +139,8 @@ export const useStore = create<PlayerState>((set, get) => ({
   duration: 0,
   currentChunkIndex: 0,
   stopAfterCurrentChunk: false,
+  isLoopMode: false,
+  loopSource: null,
   voiceVolume: 1.0,
   noiseVolume: 0.3,
   noiseEnabled: true,
@@ -424,55 +430,74 @@ export const useStore = create<PlayerState>((set, get) => ({
     }
   },
 
-  nextChunk: () => {
-    const { activeMaterial, currentChunkIndex } = get()
-    if (activeMaterial && currentChunkIndex < activeMaterial.chunks.length - 1) {
-      const nextIndex = currentChunkIndex + 1
-      const nextChunk = activeMaterial.chunks[nextIndex]
-      set({
-        currentChunkIndex: nextIndex,
-        currentTime: nextChunk.start_time,
-        isPlaying: false,
-      })
+  // Loop control functions
+  toggleLoopMode: (source: 'play-button' | 'chunk-click' | null) => {
+    const { isLoopMode, loopSource } = get()
+    const newLoopMode = !isLoopMode
+    const newLoopSource = newLoopMode ? source : null
+
+    set({ isLoopMode: newLoopMode, loopSource: newLoopSource })
+  },
+
+  setLoopMode: (enabled: boolean, source: 'play-button' | 'chunk-click' | null = null) => {
+    set({ isLoopMode: enabled, loopSource: enabled ? source : null })
+  },
+
+  tick: delta => {
+    const {
+      isPlaying,
+      isGap,
+      currentTime,
+      currentChunkIndex,
+      activeMaterial,
+      isLoopMode,
+      loopSource,
+    } = get()
+    if (isPlaying && !isGap && activeMaterial && currentChunkIndex < activeMaterial.chunks.length) {
+      const currentChunk = activeMaterial.chunks[currentChunkIndex]
+      const chunkEndTime = currentChunk.end_time
+
+      // 只有在音频播放期间（通过isGap控制）才累加时间
+      if (currentTime < chunkEndTime) {
+        set({ currentTime: currentTime + delta })
+      }
+    } else if (isPlaying && isGap && isLoopMode && activeMaterial) {
+      // 循环播放逻辑
+      let nextIndex: number
+
+      if (loopSource === 'play-button') {
+        // Play按钮循环：从当前chunk开始，循环整个材料
+        if (currentChunkIndex >= activeMaterial.chunks.length - 1) {
+          // 到达最后一个chunk，从第一个重新开始
+          nextIndex = 0
+        } else {
+          nextIndex = currentChunkIndex + 1
+        }
+      } else if (loopSource === 'chunk-click') {
+        // Chunk点击循环：只循环当前chunk
+        nextIndex = currentChunkIndex
+      } else {
+        // 默认行为：播放下一个
+        if (currentChunkIndex < activeMaterial.chunks.length - 1) {
+          nextIndex = currentChunkIndex + 1
+        } else {
+          return // 到达结尾，停止播放
+        }
+      }
+
+      if (nextIndex < activeMaterial.chunks.length) {
+        const nextChunk = activeMaterial.chunks[nextIndex]
+        set({
+          currentChunkIndex: nextIndex,
+          currentTime: nextChunk.start_time,
+          isGap: false,
+          isLoadingAudio: true,
+        })
+
+        // 触发播放下一个chunk
+        get().play(nextIndex, false)
+      }
     }
-  },
-
-  previousChunk: () => {
-    const { activeMaterial, currentChunkIndex } = get()
-    if (activeMaterial && currentChunkIndex > 0) {
-      const prevIndex = currentChunkIndex - 1
-      const prevChunk = activeMaterial.chunks[prevIndex]
-      set({
-        currentChunkIndex: prevIndex,
-        currentTime: prevChunk.start_time,
-        isPlaying: false,
-      })
-    }
-  },
-
-  setVoiceVolume: val => set({ voiceVolume: val }),
-  setNoiseVolume: val => {
-    set({ noiseVolume: val })
-    audioService.setNoiseVolume(val)
-  },
-  toggleNoise: () => {
-    const { noiseEnabled, noiseVolume, settings } = get()
-    const newState = !noiseEnabled
-
-    if (newState) {
-      const intensity = settings.noiseIntensity || 0.5
-      const volume = noiseVolume * intensity
-      audioService.startNoise(volume, settings.noiseType as any, settings.customNoiseData || null)
-    } else {
-      audioService.stopNoise()
-    }
-
-    set({ noiseEnabled: newState })
-  },
-  setNoiseType: (type: 'white' | 'gaussian' | 'custom') => {
-    set(state => ({
-      settings: { ...state.settings, noiseType: type },
-    }))
   },
   setNoiseIntensity: (intensity: number) => {
     set(state => ({
@@ -640,19 +665,6 @@ export const useStore = create<PlayerState>((set, get) => ({
   setIsLoadingAudio: loading => set({ isLoadingAudio: loading }),
   setStopAfterCurrentChunk: stop => set({ stopAfterCurrentChunk: stop }),
   setGapSound: sound => set({ gapSound: sound }),
-
-  tick: delta => {
-    const { isPlaying, isGap, currentTime, currentChunkIndex, activeMaterial } = get()
-    if (isPlaying && !isGap && activeMaterial && currentChunkIndex < activeMaterial.chunks.length) {
-      const currentChunk = activeMaterial.chunks[currentChunkIndex]
-      const chunkEndTime = currentChunk.end_time
-
-      // 只有在音频播放期间（通过isGap控制）才累加时间
-      if (currentTime < chunkEndTime) {
-        set({ currentTime: currentTime + delta })
-      }
-    }
-  },
 }))
 
 initializeStore().then(({ settings, materials }) => {

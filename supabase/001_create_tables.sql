@@ -9,6 +9,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ============================================
 CREATE TABLE IF NOT EXISTS sf_user_profiles (
   user_uuid UUID PRIMARY KEY,
+  email VARCHAR(255) UNIQUE,
+  email_verified BOOLEAN DEFAULT FALSE,
   nickname VARCHAR(50) UNIQUE,
   public_count INTEGER DEFAULT 0,
   private_count INTEGER DEFAULT 0,
@@ -16,8 +18,21 @@ CREATE TABLE IF NOT EXISTS sf_user_profiles (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Index for nickname lookup
-CREATE INDEX IF NOT EXISTS idx_sf_user_profiles_nickname ON sf_user_profiles(nickname);
+-- Add columns if they don't exist (for existing tables)
+DO $$ BEGIN
+  ALTER TABLE sf_user_profiles ADD COLUMN IF NOT EXISTS email VARCHAR(255) UNIQUE;
+EXCEPTION
+  WHEN duplicate_column THEN null;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE sf_user_profiles ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+EXCEPTION
+  WHEN duplicate_column THEN null;
+END $$;
+
+-- Index for email lookup
+CREATE INDEX IF NOT EXISTS idx_sf_user_profiles_email ON sf_user_profiles(email);
 
 -- ============================================
 -- STUDY MATERIALS (with compression support)
@@ -263,3 +278,60 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trigger_update_material_analytics
     AFTER INSERT OR UPDATE ON sf_material_ratings
     FOR EACH ROW EXECUTE FUNCTION update_material_analytics();
+
+-- ============================================
+-- ACCOUNT RECOVERY
+-- ============================================
+CREATE TABLE IF NOT EXISTS sf_recovery_codes (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  email VARCHAR(255) NOT NULL,
+  code VARCHAR(20) NOT NULL,
+  user_uuid UUID NOT NULL REFERENCES sf_user_profiles(user_uuid) ON DELETE CASCADE,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(email, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sf_recovery_codes_email ON sf_recovery_codes(email);
+CREATE INDEX IF NOT EXISTS idx_sf_recovery_codes_expires ON sf_recovery_codes(expires_at);
+
+-- ============================================
+-- EMAIL BINDING FUNCTIONS
+-- ============================================
+
+-- Migrate user data from one UUID to another (for email binding)
+DROP FUNCTION IF EXISTS migrate_user_data(UUID, UUID);
+CREATE OR REPLACE FUNCTION migrate_user_data(from_uuid UUID, to_uuid UUID)
+RETURNS VOID AS $$
+BEGIN
+  -- Update materials
+  UPDATE sf_materials SET user_uuid = to_uuid WHERE user_uuid = from_uuid;
+  
+  -- Update user progress
+  UPDATE sf_user_progress SET user_uuid = to_uuid WHERE user_uuid = from_uuid;
+  
+  -- Update training sessions
+  UPDATE sf_training_sessions SET user_uuid = to_uuid WHERE user_uuid = from_uuid;
+  
+  -- Update favorites
+  UPDATE sf_user_favorites SET user_uuid = to_uuid WHERE user_uuid = from_uuid;
+  
+  -- Update ratings
+  UPDATE sf_material_ratings SET user_uuid = to_uuid WHERE user_uuid = from_uuid;
+  
+  -- Delete old profile
+  DELETE FROM sf_user_profiles WHERE user_uuid = from_uuid;
+  
+  -- Clean up recovery codes
+  DELETE FROM sf_recovery_codes WHERE user_uuid = from_uuid;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Clean up expired recovery codes (run periodically)
+DROP FUNCTION IF EXISTS cleanup_expired_recovery_codes();
+CREATE OR REPLACE FUNCTION cleanup_expired_recovery_codes()
+RETURNS VOID AS $$
+BEGIN
+  DELETE FROM sf_recovery_codes WHERE expires_at < NOW();
+END;
+$$ LANGUAGE plpgsql;

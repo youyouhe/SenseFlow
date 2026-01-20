@@ -25,6 +25,9 @@ import {
   RefreshCw,
   FileAudio,
   Zap,
+  Mail,
+  Link,
+  AlertTriangle,
 } from 'lucide-react'
 import { Button } from './ui/Button'
 import { translations } from '../services/translations'
@@ -78,10 +81,22 @@ export const Settings = () => {
   // Community Identity State
   const [userUuid, setUserUuid] = React.useState('')
   const [nickname, setNickname] = React.useState('')
+  const [email, setEmail] = React.useState('')
+  const [emailBound, setEmailBound] = React.useState(false)
   const [quota, setQuota] = React.useState<UserQuota | null>(null)
   const [isLoadingProfile, setIsLoadingProfile] = React.useState(true)
   const [isSavingNickname, setIsSavingNickname] = React.useState(false)
+  const [isBindingEmail, setIsBindingEmail] = React.useState(false)
   const [nicknameError, setNicknameError] = React.useState('')
+  const [emailError, setEmailError] = React.useState('')
+  const [emailSuccess, setEmailSuccess] = React.useState('')
+  const [recoveryStep, setRecoveryStep] = React.useState<'input' | 'verify' | undefined>(undefined)
+  const [recoveryEmail, setRecoveryEmail] = React.useState('')
+  const [recoveryCode, setRecoveryCode] = React.useState('')
+  const [isVerifying, setIsVerifying] = React.useState(false)
+  const [isSendingCode, setIsSendingCode] = React.useState(false)
+  const [isReplacingUuid, setIsReplacingUuid] = React.useState(false)
+  const [userUuidInput, setUserUuidInput] = React.useState('')
 
   const handleSave = () => {
     updateSettings(localState)
@@ -292,6 +307,8 @@ export const Settings = () => {
         const uuid = userIdentityService.getOrCreateUUID()
         setUserUuid(uuid)
         setNickname(userIdentityService.getNickname() || '')
+        setEmail(userIdentityService.getEmail() || '')
+        setEmailBound(!!userIdentityService.getEmail())
         const q = await userIdentityService.getQuota()
         setQuota(q)
       } catch (error) {
@@ -352,6 +369,110 @@ export const Settings = () => {
   // Copy UUID handler
   const handleCopyUuid = () => {
     navigator.clipboard.writeText(userUuid)
+  }
+
+  // Clear UUID handler
+  const handleClearUuid = () => {
+    if (!confirm('确定要清除当前设备身份吗？清除后您可以通过邮箱恢复账户。此操作不可撤销。')) {
+      return
+    }
+    localStorage.removeItem('senseflow_user_uuid')
+    localStorage.removeItem('senseflow_user_nickname')
+    localStorage.removeItem('senseflow_user_email')
+    window.location.reload()
+  }
+
+  // Restore UUID handler
+  const handleRestoreUuid = async () => {
+    if (!userUuidInput.trim()) {
+      alert('请输入 UUID')
+      return
+    }
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(userUuidInput.trim())) {
+      alert('请输入有效的 UUID 格式')
+      return
+    }
+    if (!confirm('确定要使用此 UUID 恢复账户吗？')) {
+      return
+    }
+
+    const newUuid = userUuidInput.trim()
+    localStorage.setItem('senseflow_user_uuid', newUuid)
+
+    try {
+      await userIdentityService.syncProfileFromRemote(newUuid)
+      window.location.reload()
+    } catch (error) {
+      console.error('Error syncing profile:', error)
+      window.location.reload()
+    }
+  }
+
+  // Bind email handler
+  const handleBindEmail = async () => {
+    if (!email.trim()) {
+      setEmailError('请输入邮箱地址')
+      return
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email.trim())) {
+      setEmailError('请输入有效的邮箱地址')
+      return
+    }
+    setIsBindingEmail(true)
+    setEmailError('')
+    setEmailSuccess('')
+    try {
+      await userIdentityService.bindEmail(email.trim())
+      setEmailBound(true)
+      setEmailSuccess('邮箱绑定成功！')
+    } catch (error) {
+      setEmailError(error instanceof Error ? error.message : '绑定失败，请重试')
+    } finally {
+      setIsBindingEmail(false)
+    }
+  }
+
+  // Send recovery code handler
+  const handleSendRecoveryCode = async () => {
+    if (!recoveryEmail.trim()) {
+      alert('请输入邮箱地址')
+      return
+    }
+
+    setIsSendingCode(true)
+    try {
+      await userIdentityService.sendRecoveryCode(recoveryEmail.trim())
+      setRecoveryStep('verify')
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '发送失败')
+    } finally {
+      setIsSendingCode(false)
+    }
+  }
+
+  // Verify recovery code handler
+  const handleVerifyRecoveryCode = async () => {
+    if (!recoveryCode.trim()) {
+      alert('请输入验证码')
+      return
+    }
+
+    if (!confirm('确定要将当前账户数据迁移到邮箱关联的账户吗？此操作不可撤销。')) {
+      return
+    }
+
+    setIsVerifying(true)
+    try {
+      await userIdentityService.recoverAccount(recoveryEmail.trim(), recoveryCode.trim())
+      alert('账户恢复成功！已自动切换到您的原账户。')
+      window.location.reload()
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '恢复失败')
+    } finally {
+      setIsVerifying(false)
+    }
   }
 
   return (
@@ -1380,24 +1501,118 @@ export const Settings = () => {
                 <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
                   用户 ID (UUID)
                 </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={userUuid}
-                    readOnly
-                    className="flex-1 bg-background border border-border rounded-lg py-2 px-4 text-primary dark:text-white font-mono text-sm"
-                  />
-                  <button
-                    onClick={handleCopyUuid}
-                    className="px-4 py-2 bg-secondary text-zinc-600 dark:text-zinc-300 rounded-lg hover:bg-secondary/80 transition flex items-center gap-2 text-sm"
-                  >
-                    <Copy className="w-4 h-4" />
-                    复制
-                  </button>
-                </div>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                  此 ID 用于标识您在社区中的身份，发布资料时使用
-                </p>
+                {isReplacingUuid ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={userUuidInput}
+                      onChange={e => setUserUuidInput(e.target.value)}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      className="flex-1 bg-background border border-amber-500/50 rounded-lg py-2 px-4 text-primary dark:text-white font-mono text-sm focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none"
+                    />
+                    <button
+                      onClick={handleRestoreUuid}
+                      className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition flex items-center gap-2 text-sm"
+                    >
+                      确认
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsReplacingUuid(false)
+                        setUserUuidInput('')
+                      }}
+                      className="px-4 py-2 border border-border rounded-lg hover:bg-secondary transition text-sm"
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={userUuid}
+                      readOnly
+                      className="flex-1 bg-background border border-border rounded-lg py-2 px-4 text-primary dark:text-white font-mono text-sm"
+                    />
+                    <button
+                      onClick={handleCopyUuid}
+                      className="px-4 py-2 bg-secondary text-zinc-600 dark:text-zinc-300 rounded-lg hover:bg-secondary/80 transition flex items-center gap-2 text-sm"
+                    >
+                      <Copy className="w-4 h-4" />
+                      复制
+                    </button>
+                    <button
+                      onClick={() => setIsReplacingUuid(true)}
+                      className="px-4 py-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/20 transition flex items-center gap-2 text-sm"
+                    >
+                      替换
+                    </button>
+                    <button
+                      onClick={handleClearUuid}
+                      className="px-4 py-2 bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30 rounded-lg hover:bg-rose-500/20 transition flex items-center gap-2 text-sm"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      清除
+                    </button>
+                  </div>
+                )}
+                {userUuid && (
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                    此 ID 用于标识您在社区中的身份，发布资料时使用
+                  </p>
+                )}
+
+                {/* Email Recovery for cleared UUID */}
+                {!userUuid && (
+                  <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <h4 className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                          设备身份已清除
+                        </h4>
+                        <p className="text-xs text-amber-600/70 dark:text-amber-400/70 mt-1 mb-3">
+                          请选择以下方式恢复您的账户和资料。
+                        </p>
+
+                        {/* UUID Input */}
+                        <div className="mb-3">
+                          <label className="block text-xs font-medium text-amber-600/70 dark:text-amber-400/70 mb-1">
+                            如果您记得原 UUID，可直接输入：
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={userUuidInput}
+                              onChange={e => setUserUuidInput(e.target.value)}
+                              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                              className="flex-1 bg-background border border-amber-500/30 rounded-lg py-1.5 px-3 text-primary dark:text-white font-mono text-xs focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none"
+                            />
+                            <button
+                              onClick={handleRestoreUuid}
+                              className="px-3 py-1.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition text-xs font-medium"
+                            >
+                              恢复
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Email Recovery */}
+                        <div className="pt-3 border-t border-amber-500/20">
+                          <p className="text-xs text-amber-600/70 dark:text-amber-400/70 mb-2">
+                            或通过邮箱验证码恢复：
+                          </p>
+                          <button
+                            onClick={() => setRecoveryStep('input')}
+                            className="px-3 py-1.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition text-xs font-medium"
+                          >
+                            通过邮箱恢复
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Nickname */}
@@ -1427,6 +1642,56 @@ export const Settings = () => {
                   </button>
                 </div>
                 {nicknameError && <p className="text-xs text-rose-500 mt-1">{nicknameError}</p>}
+              </div>
+
+              {/* Email Binding */}
+              <div>
+                <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  邮箱绑定
+                </label>
+                {emailBound ? (
+                  <div className="flex items-center gap-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 text-emerald-500" />
+                      <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                        {email}
+                      </span>
+                    </div>
+                    <span className="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded">
+                      已绑定
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={e => {
+                        setEmail(e.target.value)
+                        setEmailError('')
+                      }}
+                      placeholder="输入您的邮箱"
+                      className="flex-1 bg-background border border-border rounded-lg py-2 px-4 text-primary dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                    />
+                    <button
+                      onClick={handleBindEmail}
+                      disabled={isBindingEmail}
+                      className="px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition flex items-center gap-2 text-sm font-medium disabled:opacity-50"
+                    >
+                      {isBindingEmail ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Link className="w-4 h-4" />
+                      )}
+                      绑定
+                    </button>
+                  </div>
+                )}
+                {emailError && <p className="text-xs text-rose-500 mt-1">{emailError}</p>}
+                {emailSuccess && <p className="text-xs text-emerald-500 mt-1">{emailSuccess}</p>}
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  绑定邮箱后，即使更换浏览器或设备，也能通过邮箱找回您的资料
+                </p>
               </div>
 
               {/* Quota Display */}

@@ -231,79 +231,81 @@ export const Marketplace: React.FC = () => {
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {materials.map(material => (
-            <div
-              key={material.id}
-              className="bg-surface rounded-xl border border-border p-5 hover:border-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/5 transition-all duration-300"
-            >
-              <div className="flex justify-between items-start mb-3">
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${difficultyColor(material.difficulty)}`}
-                >
-                  {material.difficulty}
-                </span>
-                <div className="flex items-center gap-2 text-zinc-400">
-                  {material.sf_material_analytics?.avg_rating > 0 && (
-                    <span className="flex items-center text-xs">
-                      <Star className="w-3 h-3 text-amber-400 mr-1" />
-                      {material.sf_material_analytics.avg_rating.toFixed(1)}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">
-                {material.title}
-              </h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4 line-clamp-2">
-                {material.description}
-              </p>
-
-              <div className="flex flex-wrap gap-2 mb-4">
-                {(material.tags || []).slice(0, 3).map((tag: string) => (
-                  <span key={tag} className="text-xs bg-secondary px-2 py-1 rounded text-zinc-500">
-                    {tag}
+              <div
+                key={material.id}
+                className="bg-surface rounded-xl border border-border p-5 hover:border-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/5 transition-all duration-300"
+              >
+                <div className="flex justify-between items-start mb-3">
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${difficultyColor(material.difficulty)}`}
+                  >
+                    {material.difficulty}
                   </span>
-                ))}
-              </div>
+                  <div className="flex items-center gap-2 text-zinc-400">
+                    {material.sf_material_analytics?.avg_rating > 0 && (
+                      <span className="flex items-center text-xs">
+                        <Star className="w-3 h-3 text-amber-400 mr-1" />
+                        {material.sf_material_analytics.avg_rating.toFixed(1)}
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-              <div className="flex items-center justify-between text-xs text-zinc-500 mb-4">
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {material.duration}s
-                </span>
-                <span className="flex items-center gap-1">
-                  <Users className="w-3 h-3" />
-                  {material.sf_material_analytics?.total_users || 0} {t.market_users || 'users'}
-                </span>
-              </div>
+                <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">
+                  {material.title}
+                </h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4 line-clamp-2">
+                  {material.description}
+                </p>
 
-              <Button onClick={() => downloadMaterial(material)} className="w-full gap-2">
-                <Download className="w-4 h-4" />
-                {t.btn_download || 'Download'}
-              </Button>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {(material.tags || []).slice(0, 3).map((tag: string) => (
+                    <span
+                      key={tag}
+                      className="text-xs bg-secondary px-2 py-1 rounded text-zinc-500"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-zinc-500 mb-4">
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {material.duration}s
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Users className="w-3 h-3" />
+                    {material.sf_material_analytics?.total_users || 0} {t.market_users || 'users'}
+                  </span>
+                </div>
+
+                <Button onClick={() => downloadMaterial(material)} className="w-full gap-2">
+                  <Download className="w-4 h-4" />
+                  {t.btn_download || 'Download'}
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          {/* Load More Trigger */}
+          {materials.length > 0 && hasMore && (
+            <div ref={loadMoreRef} className="flex items-center justify-center py-8">
+              {isLoadingMore ? (
+                <div className="flex items-center gap-2 text-zinc-500">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>加载更多...</span>
+                </div>
+              ) : (
+                <span className="text-sm text-zinc-400">滚动加载更多</span>
+              )}
             </div>
-          ))}
-        </div>
+          )}
 
-        {/* Load More Trigger */}
-        {materials.length > 0 && hasMore && (
-          <div ref={loadMoreRef} className="flex items-center justify-center py-8">
-            {isLoadingMore ? (
-              <div className="flex items-center gap-2 text-zinc-500">
-                <Loader2 className="w-5 h-5 animate-spin" />
-                <span>加载更多...</span>
-              </div>
-            ) : (
-              <span className="text-sm text-zinc-400">滚动加载更多</span>
-            )}
-          </div>
-        )}
-
-        {!hasMore && materials.length > 0 && (
-          <div className="text-center py-8 text-zinc-400 text-sm">
-            已加载全部内容
-          </div>
-        )}
+          {!hasMore && materials.length > 0 && (
+            <div className="text-center py-8 text-zinc-400 text-sm">已加载全部内容</div>
+          )}
+        </>
       )}
     </div>
   )

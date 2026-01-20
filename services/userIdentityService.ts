@@ -2,6 +2,8 @@ import { supabase } from './supabaseClient'
 
 export interface UserProfile {
   user_uuid: string
+  email: string | null
+  email_verified: boolean | null
   nickname: string | null
   public_count: number
   private_count: number
@@ -15,6 +17,7 @@ export interface UserQuota {
 }
 
 const STORAGE_KEY = 'senseflow_user_uuid'
+const STORAGE_EMAIL = 'senseflow_user_email'
 const STORAGE_NICKNAME = 'senseflow_user_nickname'
 const PUBLIC_LIMIT = 100
 const PRIVATE_LIMIT = 50
@@ -50,6 +53,173 @@ export class UserIdentityService {
 
   setNickname(nickname: string): void {
     localStorage.setItem(STORAGE_NICKNAME, nickname)
+  }
+
+  getEmail(): string | null {
+    return localStorage.getItem(STORAGE_EMAIL)
+  }
+
+  setEmail(email: string): void {
+    localStorage.setItem(STORAGE_EMAIL, email)
+  }
+
+  async bindEmail(email: string): Promise<void> {
+    const uuid = this.getOrCreateUUID()
+    email = email.toLowerCase().trim()
+
+    const { data: existing } = await supabase
+      .from('sf_user_profiles')
+      .select('user_uuid, email_verified')
+      .eq('email', email)
+      .single()
+
+    if (existing && existing.user_uuid !== uuid) {
+      throw new Error('该邮箱已被其他账户绑定')
+    }
+
+    const { error } = await supabase
+      .from('sf_user_profiles')
+      .update({ email, email_verified: false })
+      .eq('user_uuid', uuid)
+
+    if (error) {
+      console.error('Error binding email:', error)
+      throw new Error('绑定失败')
+    }
+
+    this.setEmail(email)
+  }
+
+  async findUserByEmail(email: string): Promise<string | null> {
+    const { data, error } = await supabase
+      .from('sf_user_profiles')
+      .select('user_uuid')
+      .eq('email', email.toLowerCase().trim())
+      .single()
+
+    if (error || !data) {
+      return null
+    }
+    return data.user_uuid
+  }
+
+  async migrateToEmail(newEmail: string): Promise<void> {
+    const currentUuid = this.getOrCreateUUID()
+    const targetUuid = await this.findUserByEmail(newEmail)
+
+    if (!targetUuid) {
+      throw new Error('未找到该邮箱关联的账户')
+    }
+
+    if (targetUuid === currentUuid) {
+      return
+    }
+
+    const { error: migrateError } = await supabase.rpc('migrate_user_data', {
+      from_uuid: currentUuid,
+      to_uuid: targetUuid,
+    })
+
+    if (migrateError) {
+      console.error('Error migrating data:', migrateError)
+      throw new Error('数据迁移失败')
+    }
+
+    localStorage.setItem(STORAGE_KEY, targetUuid)
+    this.setEmail(newEmail)
+  }
+
+  async fetchProfileByUuid(uuid: string): Promise<UserProfile | null> {
+    const { data, error } = await supabase
+      .from('sf_user_profiles')
+      .select('*')
+      .eq('user_uuid', uuid)
+      .single()
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return null
+      }
+      console.error('Error fetching profile:', error)
+      return null
+    }
+
+    return data
+  }
+
+  async syncProfileFromRemote(uuid: string): Promise<void> {
+    const profile = await this.fetchProfileByUuid(uuid)
+    if (profile) {
+      if (profile.nickname) {
+        this.setNickname(profile.nickname)
+      }
+      if (profile.email) {
+        this.setEmail(profile.email)
+      }
+    }
+  }
+
+  async sendRecoveryCode(email: string): Promise<void> {
+    const uuid = this.getOrCreateUUID()
+    const nickname = this.getNickname() || '用户'
+
+    const response = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-recovery-code`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+        },
+        body: JSON.stringify({ email, user_uuid: uuid, nickname }),
+      }
+    )
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '发送失败')
+    }
+  }
+
+  async verifyRecoveryCode(email: string, code: string): Promise<string | null> {
+    const { data, error } = await supabase
+      .from('sf_recovery_codes')
+      .select('user_uuid')
+      .eq('email', email.toLowerCase())
+      .eq('code', code.toUpperCase())
+      .gt('expires_at', new Date().toISOString())
+      .single()
+
+    if (error || !data) {
+      return null
+    }
+    return data.user_uuid
+  }
+
+  async recoverAccount(email: string, code: string): Promise<void> {
+    const currentUuid = this.getOrCreateUUID()
+    const targetUuid = await this.verifyRecoveryCode(email, code)
+
+    if (!targetUuid) {
+      throw new Error('验证码无效或已过期')
+    }
+
+    if (targetUuid === currentUuid) {
+      throw new Error('当前设备已在该账户下')
+    }
+
+    const { error: migrateError } = await supabase.rpc('migrate_user_data', {
+      from_uuid: currentUuid,
+      to_uuid: targetUuid,
+    })
+
+    if (migrateError) {
+      console.error('Error migrating data:', migrateError)
+      throw new Error('数据迁移失败')
+    }
+
+    localStorage.setItem(STORAGE_KEY, targetUuid)
+    this.setEmail(email)
   }
 
   async getOrCreateProfile(): Promise<UserProfile> {

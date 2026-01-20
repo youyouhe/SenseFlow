@@ -186,6 +186,8 @@ export class CommunityService {
         const uuid = userIdentityService.getUUID()
         if (uuid) {
           query = query.eq('is_public', true).eq('user_uuid', uuid)
+        } else {
+          return []
         }
         break
       }
@@ -193,6 +195,8 @@ export class CommunityService {
         const uuid = userIdentityService.getUUID()
         if (uuid) {
           query = query.eq('is_public', false).eq('user_uuid', uuid)
+        } else {
+          return []
         }
         break
       }

@@ -202,10 +202,7 @@ export const Marketplace: React.FC = () => {
         {filterOptions.map(option => (
           <button
             key={option.value}
-            onClick={() => {
-              setFilter(option.value)
-              loadMaterials(true)
-            }}
+            onClick={() => setFilter(option.value)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
               filter === option.value
                 ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-400'

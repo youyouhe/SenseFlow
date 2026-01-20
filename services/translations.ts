@@ -28,6 +28,7 @@ export const translations = {
     lib_gen_btn_random: 'Surprise Me',
     lib_start: 'Start',
     lib_start_success: 'Material added to your library!',
+    lib_material_exists: 'Material already exists in your library!',
 
     market_title: 'Community Marketplace',
     market_subtitle: 'Discover and download learning materials shared by the community',
@@ -168,6 +169,7 @@ export const translations = {
     lib_gen_btn_random: '随便来点',
     lib_start: '开始',
     lib_start_success: '素材已添加到资料库！',
+    lib_material_exists: '素材已存在于资料库中！',
 
     market_title: '社区广场',
     market_subtitle: '发现并下载社区分享的学习素材',

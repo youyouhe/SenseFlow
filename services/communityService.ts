@@ -8,6 +8,7 @@ export interface CommunityMaterial {
   title: string
   description: string | null
   original_text: string
+  text_hash: string | null
   duration: number
   config: Record<string, any>
   difficulty: 'Easy' | 'Medium' | 'Hard' | 'Insane'
@@ -29,7 +30,7 @@ export interface CommunityMaterial {
   }
 }
 
-export type MaterialFilter = 'all' | 'public' | 'private' | 'my-public' | 'my-private'
+export type MaterialFilter = 'all' | 'public' | 'my-public' | 'my-private'
 
 const PAGE_SIZE = 12
 
@@ -150,9 +151,6 @@ export class CommunityService {
     switch (filter) {
       case 'public':
         query = query.eq('is_public', true)
-        break
-      case 'private':
-        query = query.eq('is_public', false)
         break
       case 'my-public': {
         const uuid = userIdentityService.getUUID()

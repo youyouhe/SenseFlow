@@ -123,6 +123,17 @@ export const Marketplace: React.FC = () => {
   }
 
   const downloadMaterial = async (material: CommunityMaterial) => {
+    if (!material.text_hash) {
+      alert('此材料缺少哈希值，无法检测重复')
+      return
+    }
+
+    const existingMaterial = materials.find(m => m.text_hash === material.text_hash)
+    if (existingMaterial) {
+      alert(t.lib_material_exists || 'Material already exists in your library!')
+      return
+    }
+
     try {
       const studyMaterial = await communityService.downloadMaterial(material.id)
       addMaterial(studyMaterial)
@@ -134,7 +145,6 @@ export const Marketplace: React.FC = () => {
 
   const filterOptions: { value: MaterialFilter; label: string; icon: React.ReactNode }[] = [
     { value: 'public', label: 'Public', icon: <Globe className="w-4 h-4" /> },
-    { value: 'private', label: 'Private', icon: <Lock className="w-4 h-4" /> },
     { value: 'my-public', label: 'My Public', icon: <User className="w-4 h-4" /> },
     { value: 'my-private', label: 'My Private', icon: <User className="w-4 h-4" /> },
   ]

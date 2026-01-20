@@ -544,8 +544,8 @@ export class DataService {
         chunk_index: index,
         text: chunk.text,
         translation: chunk.translation || null,
-        start_time: chunk.start_time,
-        end_time: chunk.end_time,
+        start_time: Math.floor(Number(chunk.start_time)),
+        end_time: Math.floor(Number(chunk.end_time)),
         speaker: chunk.speaker || null,
       }))
 

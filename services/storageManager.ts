@@ -248,6 +248,23 @@ export class StorageManager {
     console.log('All storage cleared')
   }
 
+  /**
+   * Clear user-specific data when UUID changes (e.g., after account recovery)
+   * Keeps generic settings but clears materials, caches, and exchange data
+   */
+  async clearUserData(): Promise<void> {
+    await this.ensureInit()
+
+    await Promise.all([
+      this.idb.clear('materials'),
+      this.idb.clear('audioCache'),
+      this.idb.clear('textCache'),
+      this.idb.clear('exchangeData'),
+    ])
+
+    console.log('User data cleared (materials, caches, exchange data)')
+  }
+
   async cleanup(): Promise<number> {
     await this.ensureInit()
     return await this.cache.cleanup()

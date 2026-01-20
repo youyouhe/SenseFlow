@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient'
+import { storageManager } from './storageManager'
 
 export interface UserProfile {
   user_uuid: string
@@ -87,7 +88,16 @@ export class UserIdentityService {
   }
 
   // Notify all listeners when UUID changes
-  private notifyUUIDChange(): void {
+  private async notifyUUIDChange(): Promise<void> {
+    // Clear user-specific IndexedDB data to prevent data leakage between accounts
+    try {
+      await storageManager.clearUserData()
+      console.log('[UserIdentityService] Cleared user data from IndexedDB after UUID change')
+    } catch (error) {
+      console.warn('[UserIdentityService] Failed to clear user data:', error)
+    }
+
+    // Notify all listeners (components will reload their state)
     uuidChangeListeners.forEach(callback => callback())
   }
 
@@ -171,7 +181,7 @@ export class UserIdentityService {
 
     localStorage.setItem(STORAGE_KEY, targetUuid)
     this.setEmail(newEmail)
-    this.notifyUUIDChange()
+    await this.notifyUUIDChange()
   }
 
   async fetchProfileByUuid(uuid: string): Promise<UserProfile | null> {
@@ -265,7 +275,7 @@ export class UserIdentityService {
 
     localStorage.setItem(STORAGE_KEY, targetUuid)
     this.setEmail(email)
-    this.notifyUUIDChange()
+    await this.notifyUUIDChange()
   }
 
   async getOrCreateProfile(): Promise<UserProfile> {

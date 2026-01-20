@@ -125,13 +125,13 @@ SenseFlow/
 
 ![Library](/library-zh.png)
 
-### Training - Light Mode
+### Play - Dark Mode
 
-![Training](/play-zh-light.png)
+![Play](/play-zh-dark.png)
 
-### Training - Dark Mode
+### Play - Light Mode
 
-![Training](/play-zh-dark.png)
+![Play](/play-zh-light.png)
 
 ## Scripts
 
